@@ -26,8 +26,16 @@ export async function saveDesktopConnection(input: { apiUrl: string; token: stri
   const token = input.token.trim();
   if (token.length < 16) throw new Error("DESKTOP_TOKEN_INVALID");
   if (!safeStorage.isEncryptionAvailable()) throw new Error("DESKTOP_KEYSTORE_UNAVAILABLE");
-  const current = await loadDesktopConnection();
-  const deviceId = current.deviceId ?? randomUUID();
+  let deviceId: string = randomUUID();
+  try {
+    const current = await loadDesktopConnection();
+    deviceId = current.deviceId ?? deviceId;
+  } catch (error) {
+    const invalid = error instanceof Error && (error.message === "DESKTOP_CONNECTION_INVALID" || error.name === "SyntaxError");
+    if (!invalid) throw error;
+    // 旧版本或损坏配置不参与迁移，直接删除；随后只写入当前 v2 格式。
+    await rm(configPath(), { force: true });
+  }
   const path = configPath(); const temporary = `${path}.${randomUUID()}.tmp`;
   await mkdir(dirname(path), { recursive: true });
   try { await writeFile(temporary, `${JSON.stringify({ version: 2, apiUrl, encryptedToken: safeStorage.encryptString(token).toString("base64"), deviceId })}\n`, { encoding: "utf8", mode: 0o600 }); await rename(temporary, path); }
