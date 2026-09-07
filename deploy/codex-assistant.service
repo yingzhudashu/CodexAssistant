@@ -1,0 +1,39 @@
+[Unit]
+Description=CodexAssistant progress sync server
+After=network.target
+
+[Service]
+Type=simple
+User=codexassistant
+Group=codexassistant
+WorkingDirectory=/opt/codex-assistant/current
+Environment=NODE_ENV=production
+Environment=CODEX_ASSISTANT_HOST=127.0.0.1
+Environment=CODEX_ASSISTANT_PORT=3240
+Environment=CODEX_ASSISTANT_STATE_DIR=/var/lib/codex-assistant
+Environment=NODE_OPTIONS=--max-old-space-size=192
+EnvironmentFile=/etc/codex-assistant/codex-assistant.env
+ExecStart=/opt/node-v22.23.2-linux-x64/bin/node apps/server/dist/main.js
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=30
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+MemoryHigh=256M
+MemoryMax=320M
+CPUQuota=25%
+TasksMax=64
+LimitNOFILE=4096
+ReadWritePaths=/var/lib/codex-assistant
+
+[Install]
+WantedBy=multi-user.target
