@@ -1,0 +1,22 @@
+{
+  "name": "@codex-assistant/server",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --watch --import tsx src/main.ts",
+    "start": "node dist/main.js",
+    "faux": "node --import tsx src/faux-server.ts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^2.11.0",
+    "@opentelemetry/core": "^2.11.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
+    "@codex-assistant/protocol": "2.0.0",
+    "@fastify/websocket": "11.3.0",
+    "fastify": "5.12.1"
+  }
+}

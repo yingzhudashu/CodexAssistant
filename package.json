@@ -1,0 +1,28 @@
+{
+  "name": "codex-assistant",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "npm run build --workspace=@codex-assistant/protocol && npm run build --workspace=@codex-assistant/server && npm run build --workspace=@codex-assistant/desktop",
+    "test": "npm run build --workspace=@codex-assistant/protocol && vitest run",
+    "dev:server": "npm run dev --workspace=@codex-assistant/server",
+    "dev:desktop": "npm run dev --workspace=@codex-assistant/desktop",
+    "perf:server": "node --import tsx scripts/perf-server.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "@types/ws": "8.18.1",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  },
+  "dependencies": {}
+}

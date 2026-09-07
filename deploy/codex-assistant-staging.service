@@ -1,0 +1,39 @@
+[Unit]
+Description=CodexAssistant staging progress sync server
+After=network.target
+
+[Service]
+Type=simple
+User=codexassistant
+Group=codexassistant
+WorkingDirectory=/opt/codex-assistant-staging/current
+Environment=NODE_ENV=staging
+Environment=CODEX_ASSISTANT_HOST=127.0.0.1
+Environment=CODEX_ASSISTANT_PORT=3241
+Environment=CODEX_ASSISTANT_STATE_DIR=/var/lib/codex-assistant-staging
+Environment=NODE_OPTIONS=--max-old-space-size=160
+EnvironmentFile=/etc/codex-assistant-staging/codex-assistant.env
+ExecStart=/opt/node-v22.23.2-linux-x64/bin/node apps/server/dist/main.js
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=30
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+MemoryHigh=192M
+MemoryMax=256M
+CPUQuota=15%
+TasksMax=64
+LimitNOFILE=4096
+ReadWritePaths=/var/lib/codex-assistant-staging
+
+[Install]
+WantedBy=multi-user.target
