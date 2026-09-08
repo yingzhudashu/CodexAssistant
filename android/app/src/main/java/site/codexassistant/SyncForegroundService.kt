@@ -26,7 +26,8 @@ class SyncForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var collectJob: Job? = null
     private var previous = emptyMap<String, TaskSnapshot>()
-    private val lastNotificationAt = mutableMapOf<String, Long>()
+    private val notices = TaskNotices()
+    private var wasConnected = false
 
     override fun onCreate() {
         super.onCreate()
@@ -40,10 +41,12 @@ class SyncForegroundService : Service() {
                 // 一次服务端回放可能包含同一任务的多次变化。每个任务十秒内只提醒一次，
                 // 仍会更新同一通知 ID 的最终状态，避免恢复游标时产生通知轰炸。
                 current.values.filter { next ->
+                    if (!state.connected || !wasConnected) return@filter false
                     val old = previous[next.id]
                     old != null && (old.status != next.status || old.currentStepId != next.currentStepId)
-                }.forEach(::notifyChange)
-                lastNotificationAt.keys.retainAll(current.keys)
+                }.forEach { next -> notifyChange(previous.getValue(next.id), next) }
+                notices.retain(current.keys)
+                wasConnected = state.connected
                 previous = current
                 val summary = current.values.count { it.status in setOf("active", "waiting", "blocked", "paused") }
                 updateNotification(
@@ -102,23 +105,27 @@ class SyncForegroundService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, baseNotification(text))
     }
 
-    private fun notifyChange(task: TaskSnapshot) {
-        val now = System.currentTimeMillis()
-        val last = lastNotificationAt[task.id]
-        if (last != null && now - last < NOTIFICATION_THROTTLE_MS) return
-        lastNotificationAt[task.id] = now
-        val step = task.currentStepId?.let { id -> task.plan.find { it.id == id }?.title }
-        val text = listOf(statusLabel(task.status), step).filterNotNull().joinToString(" · ")
-        val notification = baseNotification("${task.title} · $text", EVENT_CHANNEL_ID, ongoing = false, autoCancel = true)
-        getSystemService(NotificationManager::class.java).notify(task.id.hashCode(), notification)
+    private fun notifyChange(previousTask: TaskSnapshot, task: TaskSnapshot) {
+        val notice = notices.change(previousTask, task, android.os.SystemClock.elapsedRealtime())
+        val intent = Intent(this, MainActivity::class.java)
+        val pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notification = NotificationCompat.Builder(this, EVENT_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(notice.title)
+            .setContentText(notice.text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(notice.detail))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .setSilent(notice.silent)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+        // tag 使用完整任务 ID，避免 hashCode 碰撞或覆盖常驻通知。
+        getSystemService(NotificationManager::class.java).notify(task.id, 0, notification)
     }
-
-    private fun statusLabel(status: String): String = mapOf("active" to "进行中", "paused" to "已暂停", "blocked" to "已阻塞", "waiting" to "等待中", "complete" to "已完成", "failed" to "失败")[status] ?: status
 
     companion object {
         private const val SYNC_CHANNEL_ID = "codex-sync"
         private const val EVENT_CHANNEL_ID = "codex-task-events"
         private const val NOTIFICATION_ID = 1001
-        private const val NOTIFICATION_THROTTLE_MS = 10_000L
     }
 }

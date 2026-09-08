@@ -1,33 +1,30 @@
-# 生产安装包
+# 安装包与发布
 
-## Android
+当前 Windows 和 Android 下载版本均为 `2.0.4`；Android `versionCode=7`，协议固定为 `codex-assistant.v2`。各端版本来源分别是 `apps/desktop/package.json` 与 `android/app/build.gradle.kts`。
 
-Android release 必须具备独立 release keystore。将真实配置放到用户目录外的受限文件，再执行：
+## 构建
 
 ```powershell
+npm run build
+npm test
+.\scripts\build-windows-production.ps1
 .\scripts\build-android-production.ps1 -SigningProperties C:\secure\codexassistant\android-release.properties
 ```
 
-脚本会执行 `clean assembleRelease`、启用 R8、校验 APK 签名和 SHA-256，并输出到 `artifacts/android`。没有签名配置会直接失败，不会生成伪生产包。Android 包名为 `site.codexassistant`，版本从 `android/app/build.gradle.kts` 读取。后台通知由 Android 前台服务负责，不需要第三方推送凭据。
+Windows 脚本构建 Electron 与 NSIS、计算 SHA-256 并复制到 `artifacts/windows`。当前配置禁用 Authenticode 签名，清单必须如实标记 `NotSigned`；不能声称包具有受信任的发布者签名。NSIS 使用项目图标，Electron 可执行文件资源编辑目前禁用。
 
-## Windows
+Android 脚本执行 `assembleRelease`、启用 R8，使用仓库外 keystore 签名，随后执行 apksigner 验证并计算 SHA-256；产物位于 `artifacts/android`。缺少签名配置直接失败。必须保留同一 keystore 才能覆盖安装，密码不得写进日志或仓库。
 
-Windows NSIS 安装包必须使用组织的 Authenticode 证书：
+Android 回归命令：在 `android` 目录运行 `.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --no-daemon`。构建通过不等于真实设备后台验收通过。
 
-```powershell
-$env:CSC_LINK = 'C:\secure\certificates\codexassistant.p12'
-$env:CSC_KEY_PASSWORD = '<certificate-password>'
-.\scripts\build-windows-production.ps1
-```
+## 下载清单
 
-脚本会构建 Electron、生成 NSIS、复制到 `artifacts/windows` 并计算 SHA-256。没有 `CSC_LINK` 会硬失败；自签名证书不满足生产信任要求。
+服务器下载目录为 `/srv/www/codex-assistant/downloads`，公网入口为 `https://robotclaw.site/codex-assistant/downloads/`。EXE/APK 文件名包含版本且使用长期不可变缓存，发布后不能用不同字节覆盖同名文件。
 
-## 发布下载
+先上传并核对每个安装包的 SHA-256，再发布 UTF-8 无 BOM 的 `manifest.json`。清单通过 `no-store` 禁止缓存；应使用临时文件与 rename 原子替换。最后通过公网下载完整文件并再次比对哈希。
 
-下载目录由服务部署脚本创建为 `/srv/www/codex-assistant/downloads`，公网入口为 `https://robotclaw.site/codex-assistant/downloads/`。发布时只上传已经校验哈希的 APK/EXE 和 `manifest.json`，不得上传 keystore、证书私钥或 Token。Android 不依赖任何推送供应商凭据。
+清单包含 `product=CodexAssistant`、`protocolVersion`、`releasedAt`、顶层 Windows `version`，以及 `downloads.windows` 与 `downloads.android`。两者都必须包含 `url`、`file`、`sha256`、`sizeBytes`、`versionName`；Windows 还包含 `signatureStatus`，Android 还包含递增的 `versionCode`。Android 检查更新只读取当前约定字段，网络与解析都在 IO 线程执行，按 versionCode 判断新版本；下载按钮打开系统浏览器，不自动覆盖安装。
 
-## 当前发布状态
+## 服务端与回滚
 
-源码版本为 `2.0.0`，协议为 `codex-assistant.v2`。发布前必须重新构建桌面端、服务端和 Android，完成签名、静态检查、自动化测试、真实设备验收和公网 health 检查；仓库不保存安装包、APK、签名材料或部署产物。
-
-签名配置必须放在仓库外的受限路径。密码不写入仓库、文档或日志，并应另行离线备份，否则无法发布后续 Android 更新。
+客户端修复若未改变协议或 schema，不需要删除服务端数据。服务端通过 `scripts/deploy-production.ps1` 发布独立 release 并检查 health。回滚只切换已验证的 release；schema 不同直接拒绝，不执行 migration。安装包、APK、签名材料和测试截图均不提交到版本库。

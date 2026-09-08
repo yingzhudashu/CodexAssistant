@@ -38,11 +38,16 @@ export function normalizeStatus(value: unknown): TaskStatus {
 
 export function normalizeRuntimeStatus(value: unknown): RuntimeStatus {
   const raw = value && typeof value === "object" ? (value as { type?: unknown }).type : value;
-  return raw === "notLoaded" || raw === "idle" || raw === "systemError" || raw === "active" ? raw : "idle";
+  if (raw === "notLoaded" || raw === "idle" || raw === "systemError" || raw === "active") return raw;
+  return "idle";
 }
 
 export function normalizeActiveFlags(value: unknown): ActiveFlag[] {
-  const flags = value && typeof value === "object" ? (value as { activeFlags?: unknown }).activeFlags : value;
+  const record = value && typeof value === "object" ? value as { activeFlags?: unknown; waitingForApproval?: unknown; waitingForUserInput?: unknown } : {};
+  const flags = Array.isArray(record.activeFlags) ? record.activeFlags : [
+    record.waitingForApproval === true ? "waitingOnApproval" : undefined,
+    record.waitingForUserInput === true ? "waitingOnUserInput" : undefined,
+  ];
   if (!Array.isArray(flags)) return [];
   return [...new Set(flags.filter((flag): flag is ActiveFlag => flag === "waitingOnApproval" || flag === "waitingOnUserInput"))].slice(0, 2);
 }

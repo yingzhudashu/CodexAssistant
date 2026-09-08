@@ -47,6 +47,8 @@ class CredentialStore(context: Context) {
         preferences.edit().putString("token", Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
     }
     fun apiUrl(): String = preferences.getString("apiUrl", BuildConfig.CODEX_BASE_URL) ?: BuildConfig.CODEX_BASE_URL
+    /** 用户可填站点根地址或旧界面保存的 /codex-assistant 地址，线上请求统一使用站点根。 */
+    fun serverBaseUrl(): String = apiUrl().trimEnd('/').removeSuffix("/codex-assistant")
     fun saveApiUrl(value: String) {
         val normalized = value.trim().removeSuffix("/")
         require(normalized.isNotBlank()) { "服务地址不能为空" }

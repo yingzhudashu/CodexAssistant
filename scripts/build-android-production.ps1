@@ -1,11 +1,12 @@
 [CmdletBinding()]
 param(
     [string]$SigningProperties = "$env:USERPROFILE\.codexassistant\android-release.properties",
-    [string]$Output = "$(Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')).Path 'artifacts/android')"
+    [string]$Output
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if (-not $Output) { $Output = Join-Path $root 'artifacts/android' }
 if (-not (Test-Path -LiteralPath $SigningProperties)) { throw "Signing properties not found: $SigningProperties" }
 $properties = @{}
 Get-Content -LiteralPath $SigningProperties | ForEach-Object {
@@ -21,7 +22,7 @@ $env:CODEX_ASSISTANT_KEY_PASSWORD = $properties.keyPassword
 $outputPath = (Resolve-Path (New-Item -ItemType Directory -Force -Path $Output)).Path
 Push-Location (Join-Path $root 'android')
 try {
-    & .\gradlew.bat --no-daemon clean assembleRelease
+    & .\gradlew.bat --no-daemon assembleRelease
     if ($LASTEXITCODE) { throw 'Android production build failed.' }
 } finally { Pop-Location }
 $apk = Join-Path $root 'android/app/build/outputs/apk/release/app-release.apk'

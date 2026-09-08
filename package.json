@@ -13,6 +13,7 @@
   "scripts": {
     "build": "npm run build --workspace=@codex-assistant/protocol && npm run build --workspace=@codex-assistant/server && npm run build --workspace=@codex-assistant/desktop",
     "test": "npm run build --workspace=@codex-assistant/protocol && vitest run",
+    "check:docs": "node scripts/check-docs.mjs",
     "dev:server": "npm run dev --workspace=@codex-assistant/server",
     "dev:desktop": "npm run dev --workspace=@codex-assistant/desktop",
     "perf:server": "node --import tsx scripts/perf-server.mjs"

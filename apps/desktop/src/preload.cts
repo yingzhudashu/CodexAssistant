@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("codexAssistant", {
   saveConnection: (input: { apiUrl: string; token: string }) => ipcRenderer.invoke("connection.save", input),
   getTasks: () => ipcRenderer.invoke("tasks.get") as Promise<TaskSnapshot[]>,
   getSyncStatus: () => ipcRenderer.invoke("sync.status") as Promise<"connecting" | "syncing" | "connected" | "offline">,
+  checkUpdate: () => ipcRenderer.invoke("update.check") as Promise<{ currentVersion: string; latestVersion: string; available: boolean; windowsUrl?: string; androidUrl?: string }>,
+  downloadUpdate: (target: "windows" | "android") => ipcRenderer.invoke("update.download", target) as Promise<{ opened: boolean }>,
   onTasks: (listener: (tasks: TaskSnapshot[]) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, tasks: TaskSnapshot[]) => listener(tasks);
     ipcRenderer.on("tasks.updated", handler);

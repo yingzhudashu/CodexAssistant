@@ -14,11 +14,19 @@
 - `latestTurn` 表示最近回合的 `inProgress`、`completed`、`interrupted` 或 `failed`，错误只保留安全代码和脱敏摘要。
 - `freshness` 表示 `fresh`、`stale` 或 `unavailable`；详情 RPC 失败时不得把缓存线程改写成失败。
 
-展示状态优先级固定为 Goal → Turn 结果 → 线程运行态 → 空闲状态。动作只允许 `command_execution`、`file_change`、`mcp_call`、`agent_message`，不携带正文。
+当前 deriveTaskStatus 按以下顺序决定展示状态（命中即返回）：
+
+1. 存在 Goal 状态时返回 Goal 状态。
+2. 最近 Turn 为 failed 时返回 failed；interrupted 时返回 idle。
+3. Turn 为 inProgress 或线程为 active 时，根据 activeFlags 返回 waiting 或 active。
+4. 线程为 systemError 时返回 failed。
+5. Turn 为 completed 时返回 complete，其余返回 idle。
+
+因此历史 completed Turn 不会盖过当前 active 线程，Goal 为 active 时也不会被等待标志覆盖。动作只允许 `command_execution`、`file_change`、`mcp_call`、`agent_message`，不携带正文。
 
 ## WebSocket
 
-客户端必须先发送严格的 `auth`，再发送一次 `subscribe` 和 `after` 游标。服务端响应 `authenticated`，随后发送缺失的 `event`，最后发送 `snapshot`。未知字段、错误版本、错误顺序和超大消息直接关闭连接。
+客户端必须先发送严格的 `auth`，再发送一次 `subscribe` 和 `after` 游标。服务端响应 `authenticated`，随后发送游标后最多 500 条 `event`，最后发送包含所有当前任务的 `snapshot`。超过 500 条的中间历史不会继续分页发送，最新状态由 snapshot 校准；当前机制不能用于完整历史审计。未知字段、错误版本、错误顺序和超大消息直接关闭连接。
 
 ## HTTP
 
@@ -29,3 +37,17 @@
 - `GET /codex-assistant/api/v2/traces/:traceId`：Bearer Token 鉴权，返回最多 1000 个 span。
 - `GET /codex-assistant/api/v2/stream`：WebSocket auth/subscribe。
 - Android 不登记云端推送令牌；前台服务直接使用现有 WebSocket 接收事件并生成本地通知。
+
+Android 序列化启用 `encodeDefaults=true` 和 `explicitNulls=false`：auth/subscribe 的 type、protocolVersion 即使有默认值也必须发送，可选 null 字段则省略。必须收到 snapshot 才标记已连接；回放 event 不提前切换连接状态。重复序号忽略，snapshot 游标按服务端值校准。
+
+## 时间语义
+
+协议中的时间统一以 UTC ISO-8601 传输。Android 和 Windows 在显示时才转换到设备时区，包含年月日、时分秒和 UTC 偏移量；不得去掉 Z 后直接当作本地时间，也不固定加八小时。
+
+`updatedAt` 是任务源数据的最近更新时间，不是扫描时间。对于由本机回合生命周期确定的展示状态，`changedAt` 是最近开始、完成或中止事件的时间，不随后续元数据更新而漂移；Goal 优先时保留归一化快照的 changedAt（当前来自线程元数据），它不是独立观测的 Goal 状态变更时间。缓存读取失败只改变 freshness，不把缓存时间更新成现在。Windows 底部“最后采集”表示本次采集时间，不能代替任务发生时间。
+
+## 连接状态与边界
+
+Android 正常链路为 connecting → authenticating → subscribing → connected。断开后显示 offline/reconnecting 并按 1 至 6 秒延迟重试；not_configured 表示缺少 Token。auth_failed 与 protocol_error 为不可重试错误，保存配置后重建连接。当前没有独立的系统网络恢复回调，5 秒恢复目标尚未验证。
+
+HTTP body 上限 128 KiB，WebSocket 的 32 KiB 限制作用于客户端入站消息，服务端任务快照没有按该大小分块。慢订阅者缓冲超过 256 KiB 时会跳过广播，目前没有强制断开以立即触发重放的机制。这些边界需纳入后续稳定性验收。

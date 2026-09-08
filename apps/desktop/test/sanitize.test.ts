@@ -20,6 +20,7 @@ describe("desktop redaction", () => {
     expect(deriveTaskStatus("complete", "idle", [], undefined)).toBe("complete");
     expect(deriveTaskStatus(undefined, "idle", [], { status: "completed" })).toBe("complete");
     expect(deriveTaskStatus(undefined, "idle", [], { status: "interrupted" })).toBe("idle");
-    expect(normalizeTurn({ status: "failed", startedAt: 1_700_000_000_000, error: { code: "RPC_FAILED", message: "temporary" } })).toMatchObject({ status: "failed", error: { code: "RPC_FAILED" } });
+  expect(normalizeTurn({ status: "failed", startedAt: 1_700_000_000_000, error: { code: "RPC_FAILED", message: "temporary" } })).toMatchObject({ status: "failed", error: { code: "RPC_FAILED" } });
+  expect(normalizeTurn({ status: "inProgress", startedAt: "2026-09-08T00:00:00Z" })).toMatchObject({ status: "inProgress" });
   });
 });
