@@ -16,7 +16,13 @@ for (const file of files) {
 const readme = readFileSync(resolve(root, "README.md"), "utf8");
 const release = readFileSync(resolve(root, "docs/release.zh-CN.md"), "utf8");
 const desktop = JSON.parse(readFileSync(resolve(root, "apps/desktop/package.json"), "utf8"));
-const android = readFileSync(resolve(root, "android/app/build.gradle.kts"), "utf8").match(/versionName\s*=\s*"([^"]+)"/)?.[1];
-if (!desktop.version || !android || !readme.includes(`2.0.4`) || !release.includes(`2.0.4`)) errors.push("version references are incomplete; update README/release docs with client versions");
+const androidSource = readFileSync(resolve(root, "android/app/build.gradle.kts"), "utf8");
+const android = androidSource.match(/versionName\s*=\s*"([^"]+)"/)?.[1];
+const versionCode = androidSource.match(/versionCode\s*=\s*(\d+)/)?.[1];
+// 从源码读取版本，升级安装包却未更新文档时必须失败，不能把已发布版本硬编码在检查器中。
+for (const version of [desktop.version, android]) {
+  if (!version || !readme.includes(version) || !release.includes(version)) errors.push(`README/release docs do not describe client version ${version ?? "missing"}`);
+}
+if (!versionCode || !readme.includes(`Android versionCode **${versionCode}**`) || !release.includes(`versionCode=${versionCode}`)) errors.push("Android versionCode in README/release docs differs from source");
 if (errors.length) { console.error(errors.join("\n")); process.exit(1); }
 console.log(`docs: ${files.length} Markdown files checked; local links and current client version references are valid`);
