@@ -32,7 +32,10 @@ data class TaskState(
 
 /** Android 端只负责协议接收和 reducer，不把网络细节泄漏到 Compose。 */
 class TaskRepository(private val credentials: CredentialStore) {
-    private val json = Json { ignoreUnknownKeys = false; isLenient = false }
+    // 协议消息的 type、protocolVersion 等字段有默认值，但它们仍是线上的必填字段。
+    // kotlinx.serialization 默认会省略默认值；必须开启 encodeDefaults，否则服务端会把
+    // 首条认证消息看成没有协议版本的非法消息。
+    private val json = wireJson
     private val traceLogger = TraceLogger()
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -57,7 +60,7 @@ class TaskRepository(private val credentials: CredentialStore) {
             launch(Dispatchers.IO) {
                 try {
                     val token = credentials.token() ?: return@launch
-                    val base = credentials.apiUrl().replace(Regex("/$"), "")
+                    val base = credentials.serverBaseUrl()
                     while (true) {
                         val spans = traceLogger.pending()
                         if (spans.isEmpty()) break
@@ -95,7 +98,7 @@ class TaskRepository(private val credentials: CredentialStore) {
         connect = connect@{
             val token = credentials.token()
             if (token == null) { state = state.copy(connected = false, connectionStatus = "not_configured", error = "请先配置访问 Token"); trySend(state); return@connect }
-            val base = credentials.apiUrl().replaceFirst(Regex("^http"), "ws")
+            val base = credentials.serverBaseUrl().replaceFirst(Regex("^http"), "ws")
             val request = Request.Builder().url("$base/codex-assistant/api/v2/stream").build()
             val connectionTraceId = traceLogger.newTraceId()
             traceLogger.event("websocket.connect", connectionTraceId)
@@ -135,14 +138,15 @@ class TaskRepository(private val credentials: CredentialStore) {
                             "event" -> {
                                 val event = traceLogger.span("websocket.event.decode", connectionTraceId) { json.decodeFromString<EventMessage>(text).event }
                                 scheduleTraceUpload()
-                                state = state.copy(connected = true, connectionStatus = "connected", cursor = maxOf(state.cursor, event.sequence), tasks = upsert(state.tasks, event.task), error = null, lastConnectedAtEpochMs = System.currentTimeMillis(), lastTraceId = event.trace.traceId)
+                                if (event.sequence <= state.cursor) return
+                                state = state.copy(cursor = event.sequence, tasks = upsert(state.tasks, event.task), error = null, lastConnectedAtEpochMs = System.currentTimeMillis(), lastTraceId = event.trace.traceId)
                                 credentials.saveCursor(state.cursor)
                                 trySend(state)
                             }
                             "snapshot" -> {
                                 val snapshot = json.decodeFromString<SnapshotMessage>(text)
                                 state = traceLogger.span("websocket.snapshot.reducer", connectionTraceId) {
-                                    state.copy(connected = true, connectionStatus = "connected", cursor = maxOf(state.cursor, snapshot.cursor), tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis())
+                                    state.copy(connected = true, connectionStatus = "connected", cursor = snapshot.cursor, tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis())
                                 }
                                 scheduleTraceUpload()
                                 credentials.saveCursor(state.cursor)
@@ -168,6 +172,7 @@ class TaskRepository(private val credentials: CredentialStore) {
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
                     traceLogger.event("websocket.failure", connectionTraceId)
                     scheduleTraceUpload()
+                    if (stopped || permanentFailure) return
                     state = state.copy(connected = false, connectionStatus = "offline", error = "网络连接已断开")
                     trySend(state)
                     scheduleReconnect()
@@ -176,7 +181,8 @@ class TaskRepository(private val credentials: CredentialStore) {
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     traceLogger.event("websocket.closed", connectionTraceId)
                     scheduleTraceUpload()
-                    state = state.copy(connected = false, connectionStatus = if (permanentFailure) "protocol_error" else "reconnecting")
+                    if (stopped || permanentFailure) return
+                    state = state.copy(connected = false, connectionStatus = "reconnecting")
                     trySend(state)
                     scheduleReconnect()
                 }

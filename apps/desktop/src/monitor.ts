@@ -7,6 +7,8 @@ import { CodexAppServer, type AppServerItem, type AppServerPlanStep, type AppSer
 import { deriveTaskStatus, fingerprint, normalizeAction, normalizeActiveFlags, normalizeRuntimeStatus, normalizeTurn, projectName, sanitizeText } from "./sanitize.js";
 import { TraceLogger, childTrace, newTraceContext, traceparent } from "./trace.js";
 
+import { LifecycleReader, type Lifecycle } from "./lifecycle.js";
+
 type PendingEvent = IngestEvent & { fingerprint: string };
 type StoredOutbox = { deviceId: string; nextSequence: number; events: PendingEvent[]; fingerprints: Record<string, string> };
 type CachedTask = { stamp: string; task: TaskSnapshot };
@@ -43,6 +45,7 @@ export class Monitor {
   #polling = false;
   #onTasks: (tasks: TaskSnapshot[]) => void;
   #onStatus: (status: MonitorStatus) => void;
+  #lifecycle = new LifecycleReader();
   #threadCache = new Map<string, CachedTask>();
   #nextFlushAt = 0;
   #flushAttempt = 0;
@@ -104,6 +107,7 @@ export class Monitor {
       await this.#server.start();
       const threads = await this.#server.listThreads();
       const seen = new Set(threads.map((thread) => thread.id));
+      this.#lifecycle.retain(seen);
       for (const id of this.#threadCache.keys()) if (!seen.has(id)) this.#threadCache.delete(id);
       for (const id of Object.keys(this.#outbox.fingerprints)) if (!seen.has(id) && !this.#outbox.events.some((event) => event.task.id === id)) delete this.#outbox.fingerprints[id];
       while (Object.keys(this.#outbox.fingerprints).length > MAX_FINGERPRINTS) delete this.#outbox.fingerprints[Object.keys(this.#outbox.fingerprints)[0]];
@@ -132,10 +136,14 @@ export class Monitor {
   }
 
   async #normalizeCached(thread: AppServerThread): Promise<TaskSnapshot> {
-    const stamp = `${String(thread.updatedAt ?? "")}|${String(thread.status ?? "")}|${thread.name ?? ""}|${thread.preview ?? ""}|${this.#server.planRevision(thread.id)}`;
+    const lifecycle = await this.#lifecycle.read(thread.id, thread.path);
+    const stamp = JSON.stringify([thread.updatedAt, thread.status, thread.name, thread.preview, this.#server.planRevision(thread.id), this.#server.latestTurn(thread.id)]);
     const cached = this.#threadCache.get(thread.id);
-    if (cached?.stamp === stamp) return cached.task;
-    const task = await this.#normalize(thread);
+    if (cached?.stamp === stamp) {
+      cached.task = applyLifecycle(cached.task, lifecycle);
+      return cached.task;
+    }
+    const task = applyLifecycle(await this.#normalize(thread), lifecycle);
     this.#threadCache.set(thread.id, { stamp, task });
     return task;
   }
@@ -145,17 +153,18 @@ export class Monitor {
     const runtimeStatus = normalizeRuntimeStatus(thread.status);
     const activeFlags = normalizeActiveFlags(thread.status);
     const cached = this.#threadCache.get(thread.id)?.task;
-    if (cached) return { ...cached, freshness: "stale", updatedAt, changedAt: updatedAt, error: { code: "DETAIL_UNAVAILABLE", message: "线程详情暂时不可用，显示最近一次状态" } };
+    // 读取失败不意味着任务发生了变化：缓存的来源时间必须与缓存内容一起保留。
+    if (cached) return { ...cached, freshness: "stale", error: { code: "DETAIL_UNAVAILABLE", message: "线程详情暂时不可用，显示最近一次状态" } };
     return { id: thread.id, title: sanitizeText(thread.name || thread.preview || thread.id), ...(projectName(thread.cwd) ? { projectName: projectName(thread.cwd) } : {}), status: deriveTaskStatus(undefined, runtimeStatus, activeFlags, undefined), runtimeStatus, activeFlags, freshness: "unavailable", source: "thread", plan: [], updatedAt, changedAt: updatedAt, error: { code: "DETAIL_UNAVAILABLE", message: "线程详情暂时不可用" } };
   }
 
   async #normalize(thread: AppServerThread): Promise<TaskSnapshot> {
     const [read, goal, turns, items] = await Promise.all([this.#server.readThread(thread.id), this.#server.getGoal(thread.id), this.#server.listTurns(thread.id), this.#server.listItems(thread.id)]);
     const loaded = asRecord(read).thread;
-    const currentThread = loaded && typeof loaded === "object" ? { ...thread, ...(loaded as AppServerThread) } : thread;
+    const currentThread = loaded && typeof loaded === "object" ? { ...(loaded as AppServerThread), ...thread } : thread;
     const goalData = goal && typeof goal === "object" ? goal as Record<string, unknown> : undefined;
     const turnRows = asRecord(turns).data ?? turns;
-    const latestTurn = Array.isArray(turnRows) ? normalizeTurn(turnRows[0]) : undefined;
+    const latestTurn = normalizeTurn(this.#server.latestTurn(thread.id)) ?? (Array.isArray(turnRows) ? normalizeTurn(turnRows[0]) : undefined);
     const runtimeStatus = normalizeRuntimeStatus(currentThread.status);
     const activeFlags = normalizeActiveFlags(currentThread.status);
     const goalStatus = goalData?.status === "active" || goalData?.status === "paused" || goalData?.status === "blocked" || goalData?.status === "usageLimited" || goalData?.status === "budgetLimited" || goalData?.status === "complete"
@@ -276,3 +285,15 @@ function parseStrictEvent(value: unknown): IngestEvent | undefined {
 }
 
 export function deviceIdFromInstall(seed: string): string { return createHash("sha256").update(seed).digest("hex").slice(0, 32); }
+
+/** 保留独立 RPC 的官方运行态；本机生命周期只修正最近回合，不能伪造 active flags。 */
+export function applyLifecycle(task: TaskSnapshot, lifecycle?: Lifecycle): TaskSnapshot {
+  if (!lifecycle || task.runtimeStatus !== "notLoaded") return task;
+  const { error: _error, ...base } = task;
+  const latestTurn = lifecycle.turn;
+  const updatedAt = Date.parse(task.updatedAt) > Date.parse(lifecycle.updatedAt) ? task.updatedAt : lifecycle.updatedAt;
+  // 对话或元数据继续更新不应改变“进入当前回合状态”的时间。Goal 优先时保留 Goal 的时间。
+  const changedAt = task.goal ? task.changedAt : lifecycle.updatedAt;
+  return { ...base, latestTurn, status: deriveTaskStatus(task.goal?.status, task.runtimeStatus, task.activeFlags, latestTurn),
+    ...(latestTurn.error ? { error: latestTurn.error } : {}), updatedAt, changedAt };
+}

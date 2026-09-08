@@ -19,3 +19,11 @@ android/local.properties
 android/app/build/
 android/gradle/wrapper/wrapper/
 artifacts/
+*.apk
+*.exe
+*.log
+*.jks
+*.keystore
+*.p12
+*.pfx
+android-release.properties

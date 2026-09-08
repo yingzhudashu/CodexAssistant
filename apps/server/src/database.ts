@@ -5,6 +5,7 @@ import type { IngestEvent, ServerEvent, TaskSnapshot, TraceContext, TraceSpan } 
 
 const SCHEMA_VERSION = 5;
 const TABLES = ["devices", "task_events", "tasks", "trace_spans"];
+const MAX_TRACE_SPANS = 100_000;
 
 type EventRow = {
   sequence: number;
@@ -24,12 +25,14 @@ export type InsertResult = { duplicate: boolean; event: ServerEvent; shouldNotif
 /** SQLite is intentionally a single local state file. A different schema is a hard startup failure. */
 export class TaskDatabase {
   readonly #database: DatabaseSync;
+  #traceWritesSincePrune = 0;
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true });
     this.#database = new DatabaseSync(path);
     this.#database.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.#verifyOrInitialize();
+    this.#pruneTraceSpans();
   }
 
   close(): void {
@@ -152,6 +155,7 @@ export class TaskDatabase {
       span.endedAt,
       span.attributes ? JSON.stringify(span.attributes) : null,
     );
+    if (++this.#traceWritesSincePrune >= 1000) { this.#pruneTraceSpans(); this.#traceWritesSincePrune = 0; }
   }
 
   recordSpans(spans: TraceSpan[]): void {
@@ -160,11 +164,24 @@ export class TaskDatabase {
       const statement = this.#database.prepare(`INSERT OR IGNORE INTO trace_spans(span_id, trace_id, parent_span_id, name, started_at, ended_at, attributes)
         VALUES (?, ?, ?, ?, ?, ?, ?)`);
       for (const span of spans) statement.run(span.spanId, span.traceId, span.parentSpanId ?? null, span.name, span.startedAt, span.endedAt, span.attributes ? JSON.stringify(span.attributes) : null);
+      this.#traceWritesSincePrune += spans.length;
+      if (this.#traceWritesSincePrune >= 1000) { this.#pruneTraceSpans(); this.#traceWritesSincePrune = 0; }
       this.#database.exec("COMMIT");
     } catch (error) {
       this.#database.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /**
+   * 每千次写入清理一次，按接收顺序保留十万条；峰值不超过十万零九百九十九条。
+   * 使用 rowid 顺序扫描，避免每次写入按客户端时间全表排序，也不信任客户端未来时间。
+   * 只清理诊断缓存，业务事件和任务快照不受影响。
+   */
+  #pruneTraceSpans(): void {
+    this.#database.prepare(`DELETE FROM trace_spans WHERE rowid <= (
+      SELECT rowid FROM trace_spans ORDER BY rowid DESC LIMIT 1 OFFSET ?
+    )`).run(MAX_TRACE_SPANS);
   }
 
   traceSpans(traceId: string, limit = 1000): TraceSpan[] {

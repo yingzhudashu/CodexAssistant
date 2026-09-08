@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <application android:name=".CodexAssistantApplication" android:theme="@style/Theme.CodexAssistant" android:label="CodexAssistant" android:usesCleartextTraffic="${usesCleartextTraffic}">
+    <application android:name=".CodexAssistantApplication" android:theme="@style/Theme.CodexAssistant" android:label="CodexAssistant" android:icon="@drawable/ic_app_logo" android:roundIcon="@drawable/ic_app_logo" android:usesCleartextTraffic="${usesCleartextTraffic}">
         <service android:name=".SyncForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

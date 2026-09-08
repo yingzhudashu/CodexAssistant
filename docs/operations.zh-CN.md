@@ -17,7 +17,7 @@ Nginx 必须保留 `/codex-assistant/` 前缀，并为 `/api/v2/stream` 设置 W
 - `SCHEMA_MISMATCH`：停止服务，备份旧数据库后部署干净状态；不执行 migration。
 - outbox 持续增长：检查公网入口、Token、Nginx upgrade 和服务端 health/日志。
 - WebSocket 频繁断开：检查证书、反代超时和 Android 网络；客户端会携带持久化 cursor 回放。
-- app-server 超时：检查 `codex` 可执行文件、登录状态和 stderr trace；单个线程失败不会阻塞其他线程。
+- app-server 超时：检查 `codex` 可执行文件和登录状态；trace 只记录诊断事件，不保存原始 stderr；单个线程失败不会阻塞其他线程。
 
 发布回滚只能切换到上一份已验证 release。若数据库 schema 不一致，旧 release 也必须停止，不能强行复用新数据库。
 
@@ -27,16 +27,32 @@ Nginx 必须保留 `/codex-assistant/` 前缀，并为 `/api/v2/stream` 设置 W
 
 部署默认入口为 `/codex-assistant/`，服务监听 `127.0.0.1:3240`；上线后必须由运维人员实际检查 health。通知模式为 Android 前台服务：设备端由系统保活 WebSocket，并在任务状态或计划步骤变化时生成本地通知，不依赖第三方推送账号。
 
-当前源码 Android 版本为 `2.0.0`（`versionCode=3`）。发布目录中的 APK 必须由本次构建生成，并通过签名和 SHA-256 校验后再上传。
+Android 当前版本由 `android/app/build.gradle.kts` 的 `versionName` 与 `versionCode` 定义，发布脚本会从源码读取。发布目录中的 APK 必须由本次构建生成，并通过签名和 SHA-256 校验后再上传。
 
-服务端 schema 当前为 5，仅包含 `devices`、`task_events`、`tasks` 和 `trace_spans`。旧数据库直接硬失败；部署前必须备份并准备干净状态目录。数据库不保存 Android 推送令牌或厂商凭据。
+服务端 schema 当前为 5，仅包含 `devices`、`task_events`、`tasks` 和 `trace_spans`。旧数据库直接硬失败；仅在 schema 不匹配时需要人工备份并准备干净状态，同 schema 更新正常复用现有数据库。数据库不保存 Android 推送令牌或厂商凭据。
 
 ## Android 设备策略
 
 - Android 13（API 33）及以上首次启动会请求“通知”权限。拒绝后 WebSocket 仍可工作，但常驻通知和任务变化通知不可见；应在系统设置中为 CodexAssistant 重新开启通知。
 - 首次配置 Token 后，应用以前台服务方式启动同步。服务返回 `START_STICKY`，被系统回收后允许系统重建；用户在设置中强行停止应用时不会自动恢复，必须重新打开应用。
 - 华为、小米、OPPO、vivo 等系统需允许自启动、后台运行和锁屏显示通知，并将 CodexAssistant 加入电池优化白名单。各 ROM 菜单名称随系统版本变化，以设备设置为准。
-- Android 15 对 `dataSync` 前台服务存在系统时长和后台启动限制。服务被系统按策略停止时，应用会在下一次允许的前台启动后恢复游标；这不是服务端故障，也不能通过 WebSocket 绕过系统限制。
+- Android 15 对 `dataSync` 前台服务存在系统时长和后台启动限制。当前服务未实现 onTimeout 处理，达到系统限额时可能被终止或报错；需重新在前台打开应用恢复，不能视为已通过全天后台运行验收。
 - 任务变化通知使用单独通知渠道。用户可以在系统设置中调整声音、振动和锁屏显示；关闭该渠道不会影响同步本身，只会隐藏变化提醒。
 
 真实设备验收至少覆盖：锁屏持续同步、断网重连、进程被回收后的重建、通知点击回到主界面，以及四类国产 ROM 的自启动和电池策略。
+
+## 客户端故障排查
+
+- Windows 正在执行却显示空闲：先确认已安装 2.0.4。`notLoaded` 是独立 app-server 的观测结果；任务展示状态还需查看本机会话的最近回合。读取不可用时显示缓存，不猜测执行失败。
+- Android 检查更新：需要可访问 `/codex-assistant/downloads/manifest.json`。网络请求在 IO 线程，版本按 Android versionCode 判断，下载按钮交给系统浏览器。
+- Android 认证失败：检查 Token 是否完整。认证失败与网络断开分别显示，不进行无意义重试；修改配置并保存后重新认证。
+- 任务变化通知：标题以变化后的中文状态开头，正文显示前后状态，展开后包含任务及当前步骤。连续变化在十秒内静默更新最终状态。
+- Trace 保留：启动及每千次写入后清理到最近 100,000 条，不删除业务事件，不缩小已经分配的 SQLite 文件。
+- 时间相差八小时：安装 2.0.4 后，任务时间按设备时区显示。检查时间右侧偏移量：中国标准时间应为 +08:00 / GMT+8。如果设备本身设为 GMT，应在系统设置修正时区；应用不自行猜测时区。
+- 任务时间没有每两秒变化：任务更新时间只随来源数据变化，状态变化时间只随生命周期变化。应区分任务时间和 Windows 底部的最后采集时间。
+
+## 本地状态恢复
+
+Windows 连接保存在 Electron userData 下的 connection.json，待上传事件位于 state/outbox.json。当前启动逻辑在 OUTBOX_INVALID 时删除 outbox 并从空队列重建；未上传事件和本地序号可能丢失。服务端以设备 ID 与本地序号幂等，序号重置可能命中已有记录，因此不能用删除 outbox 作为常规修复手段。凭据格式不正确时，重新保存配置也会删除旧连接文件再生成当前格式，不存在字段迁移。
+
+Android 在 Keystore 数据损坏时清除不可恢复 Token 和 cursor，让用户重新配置。Token 长度至少 16 个字符；粘贴后确认没有前后空白或缺失字符。恢复连接后先接收快照再启用变化通知。

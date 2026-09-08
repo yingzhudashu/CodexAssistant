@@ -1,23 +1,24 @@
 # 当前验收状态
 
-- [x] TypeScript 协议、服务端和桌面端构建通过。
-- [x] Node 单元与服务端集成测试通过。
-- [x] Android `:app:assembleDebug` 通过。
-- [x] 协议已升级为 `codex-assistant.v2`，旧版本直接拒绝。
-- [x] 任务状态区分 Goal、线程运行态、active flags、最近 Turn 和数据新鲜度。
-- [x] 桌面详情 RPC 失败保留缓存并标记 stale，不再把正常空闲线程伪装为失败。
-- [x] Android WebSocket 具备连接中、认证中、同步中、已连接、重连中、离线、认证失败和协议错误状态。
-- [x] Android Trace 使用有界队列异步批量上传，上传失败不阻塞 WebSocket 和任务 reducer。
-- [x] 桌面端展示连接中、同步中、已连接和离线状态，线程详情失败保留缓存并标记 stale。
-- [x] 服务端支持 trace span 批量写入和 v2 trace 查询。
-- [x] 服务端性能基准可通过 `npm run perf:server` 执行。
-- [x] 构建产物、安装包和 APK 已加入忽略规则，不应提交到版本库。
+## 自动化与现场验证范围（2.0.4）
 
-## 尚未完成的外部验收
+- TypeScript 协议、服务端和桌面构建通过，Node 4 个测试文件、11 个测试通过。
+- Android 单元测试、Debug 构建、lintDebug、Release 构建与 APK v2 签名验证通过。
+- 当前真实 Codex 回合在独立 app-server 返回 notLoaded 时，由本机 task_started 事件识别为 inProgress；实际 Monitor → 隔离服务 → WebSocket 在第二轮扫描输出 active/fresh。回归覆盖完成、中止、失败、部分写入、文件截断和路径变化。
+- Android 更新请求离开调用线程的回归测试通过；连接和更新按钮在 2.0.3 模拟器版本上实测，成功同步 152 个任务。2.0.4 的时间显示通过单元测试与构建检查，未重复宣称完成真机 UI 验收。
+- 通知测试覆盖前后状态、九类中文状态标签、十秒内最终状态静默更新。
+- Android 实际序列化器发送 auth/subscribe 必填默认字段，Trace 可选 null 字段省略。
+- 服务端 Trace 十万条保留窗口、幂等和重启清理回归通过。
+- 服务端 v2 与 Nginx 已部署，health 正常；2.0.4 安装包本地与服务器 SHA-256 相符，在线清单为 2.0.4。2.0.3 曾完成公网完整下载哈希校验，不能将其当作 2.0.4 的同一份证据。
+- 时间回归覆盖 UTC/中国时区、跨日、纽约夏令时/冬令时及带偏移量的输入；状态变化时间不会被后续元数据时间覆盖。
 
-- [ ] 真实 Windows Authenticode 签名包发布。
-- [ ] 真实 Android 设备后台保活、通知权限和国产 ROM 电池策略验证。
-- [ ] 生产环境部署 v2 服务、Nginx 和全量客户端。
-- [ ] 30 分钟桌面稳定性、Android 功耗和生产压测记录。
+## 未完成或有限制的验收
 
-验收时必须覆盖 `active → waiting → paused/blocked → complete/failed` 全链路，并检查日志、trace 和网络 payload 不含 Token、命令输出、绝对路径或对话正文。
+- Windows 当前安装包未进行 Authenticode 签名。
+- Android 国产 ROM、锁屏保活、物理设备通知声音和电池策略仍需真实设备验证。
+- 30 分钟 RSS/CPU 稳定性、1,000 任务端到端负载和全部 Goal/等待状态链路尚未完成，不能由短测试推断达标。
+- 独立 app-server 不能直接观测 Codex 桌面的审批等待标志；没有终止事件的异常退出不能通过生命周期记录证明完成。
+- 桌面/Android 全量 OpenTelemetry SDK 接入、trace 树排序及桌面日志轮转尚未完成，当前实现边界见 [Trace 文档](trace.zh-CN.md)。
+- outbox 损坏后重建的序号冲突、慢订阅者跳过广播、超出 500 条的中间历史、快速重连竞态和 Android 15 前台服务超时需补充实现与验收，不能宣称已全面保证不丢事件。
+
+安装包、临时日志、截图和 schema 诊断导出不提交仓库。仓库中的验收结论只描述实测结果，保留上述限制，不标注为全面完成。

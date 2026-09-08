@@ -9,7 +9,7 @@ type RpcResponse = { id?: number; result?: unknown; error?: { message?: string }
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 
 export type AppServerThread = {
-  id: string; name?: string; preview?: string; cwd?: string; status?: string | { type?: string; activeFlags?: string[] }; updatedAt?: string | number;
+  id: string; path?: string | null; name?: string; preview?: string; cwd?: string; status?: string | { type?: string; activeFlags?: string[] }; updatedAt?: string | number;
 };
 export type AppServerGoal = { objective?: string; status?: string; timeUsedSeconds?: number; tokensUsed?: number; tokenBudget?: number };
 export type AppServerItem = { type?: string; status?: string; text?: string; name?: string; content?: unknown };
@@ -54,6 +54,8 @@ export class CodexAppServer {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #plans = new Map<string, { revision: number; steps: AppServerPlanStep[] }>();
+  #threadStatuses = new Map<string, AppServerThread["status"]>();
+  #latestTurns = new Map<string, unknown>();
   #activeTrace?: TraceContext;
   #onSpan?: (span: TraceSpan) => void;
   #onLog?: (message: string) => void;
@@ -69,6 +71,9 @@ export class CodexAppServer {
   async start(): Promise<void> {
     if (this.#child) return;
     if (Date.now() - this.#lastStartFailureAt < 1_000) throw new Error("APP_SERVER_RESTART_BACKOFF");
+    this.#plans.clear();
+    this.#threadStatuses.clear();
+    this.#latestTurns.clear();
     const command = resolveCodexCommand();
     try {
       this.#child = spawn(command, ["app-server", "--listen", "stdio://"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
@@ -89,7 +94,7 @@ export class CodexAppServer {
         for (const pending of this.#pending.values()) { clearTimeout(pending.timer); pending.reject(new Error("APP_SERVER_EXITED")); }
         this.#pending.clear();
       });
-      await this.request("initialize", { clientInfo: { name: "codex-assistant", version: "2.0.0" } }, INITIALIZE_TIMEOUT_MS);
+      await this.request("initialize", { clientInfo: { name: "codex-assistant", version: "2.0.4" } }, INITIALIZE_TIMEOUT_MS);
       this.notify("initialized", {});
     } catch (error) {
       this.#lastStartFailureAt = Date.now();
@@ -139,11 +144,16 @@ export class CodexAppServer {
         cursor = page.nextCursor ?? null;
       } while (cursor);
     }
-    return [...new Map(threads.map((thread) => [thread.id, thread])).values()];
+    const ids = new Set(threads.map(thread => thread.id));
+    for (const cache of [this.#plans, this.#threadStatuses, this.#latestTurns]) {
+      for (const id of cache.keys()) if (!ids.has(id)) cache.delete(id);
+    }
+    return [...new Map(threads.map((thread) => [thread.id, { ...thread, ...(this.#threadStatuses.has(thread.id) ? { status: this.#threadStatuses.get(thread.id) } : {}) }])).values()];
   }
 
   async readThread(idValue: string): Promise<unknown> { return this.request("thread/read", { threadId: idValue }); }
   async listTurns(idValue: string): Promise<unknown> { return this.request("thread/turns/list", { threadId: idValue, limit: 20, itemsView: "summary", sortDirection: "desc" }); }
+  latestTurn(idValue: string): unknown | undefined { return this.#latestTurns.get(idValue); }
   async listItems(idValue: string): Promise<unknown> { return this.request("thread/items/list", { threadId: idValue, limit: 100, sortDirection: "desc" }); }
   planFor(threadId: string): AppServerPlanStep[] | undefined { return this.#plans.get(threadId)?.steps; }
   planRevision(threadId: string): number { return this.#plans.get(threadId)?.revision ?? 0; }
@@ -161,6 +171,16 @@ export class CodexAppServer {
     if (line.length > MAX_JSON_LINE) { this.#onLog?.("app-server response exceeded 2 MiB"); return; }
     let message: RpcResponse & { method?: string; params?: unknown };
     try { message = JSON.parse(line) as RpcResponse & { method?: string; params?: unknown }; } catch { this.#onLog?.("app-server emitted invalid JSON"); return; }
+    if (message.method === "thread/status/changed") {
+      const params = message.params as { threadId?: unknown; status?: unknown };
+      if (typeof params.threadId === "string" && params.status && typeof params.status === "object") this.#threadStatuses.set(params.threadId, params.status as AppServerThread["status"]);
+      return;
+    }
+    if (message.method === "turn/started" || message.method === "turn/completed") {
+      const params = message.params as { threadId?: unknown; turn?: unknown };
+      if (typeof params.threadId === "string" && params.turn && typeof params.turn === "object") this.#latestTurns.set(params.threadId, params.turn);
+      return;
+    }
     if (message.method === "turn/plan/updated") {
       const params = message.params as { threadId?: unknown; plan?: unknown };
       if (typeof params.threadId === "string" && Array.isArray(params.plan)) {
