@@ -1,6 +1,6 @@
 {
   "name": "@codex-assistant/desktop",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "CodexAssistant Windows tray monitor",
   "author": "CodexAssistant",
   "private": true,

@@ -29,3 +29,5 @@ nginx -t && systemctl reload nginx
 - 更新清单单独使用 `no-store`，版本化下载文件使用一年 immutable 缓存，因此不能覆盖已发布版本文件。
 
 从 Windows 工作区运行 `scripts/deploy-production.ps1 -Server deployment-host` 可发布生产服务；脚本依赖已配置的 SSH 别名、scp、服务器 sudo 权限与现有 `/etc/nginx/sites-available/codex-assistant.conf`。它发布服务 release，不负责构建和上传客户端安装包；客户端步骤见 [发布文档](../docs/release.zh-CN.md)。
+
+staging unit 只是配置模板，现有生产脚本不会替你发布 staging；需独立准备 release、环境文件和反向代理。生产脚本的自动回滚不覆盖全部 systemd/Nginx 配置，部署前按[回滚边界](../docs/release.zh-CN.md#服务端与回滚)备份对应文件。修改 include 文件前也应核对既有 HTTPS server 的位置，不能将本文件作为完整主站 Nginx 配置覆盖安装。

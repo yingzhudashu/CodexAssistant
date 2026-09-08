@@ -24,5 +24,13 @@ for (const version of [desktop.version, android]) {
   if (!version || !readme.includes(version) || !release.includes(version)) errors.push(`README/release docs do not describe client version ${version ?? "missing"}`);
 }
 if (!versionCode || !readme.includes(`Android versionCode **${versionCode}**`) || !release.includes(`versionCode=${versionCode}`)) errors.push("Android versionCode in README/release docs differs from source");
+// 下载链接必须精确匹配各端源码，不能因为正文里仍出现某个旧版本号就误通过。
+for (const [version, extension] of [[desktop.version, "exe"], [android, "apk"]]) {
+  if (!readme.includes(`/downloads/CodexAssistant-${version}.${extension})`)) errors.push(`README download link differs from ${version}.${extension}`);
+}
+const protocol = readFileSync(resolve(root, "packages/protocol/src/index.ts"), "utf8").match(/PROTOCOL_VERSION\s*=\s*"([^"]+)"/)?.[1];
+const schema = readFileSync(resolve(root, "apps/server/src/database.ts"), "utf8").match(/SCHEMA_VERSION\s*=\s*(\d+)/)?.[1];
+if (!protocol || !readme.includes(`\`${protocol}\``) || !release.includes(`\`${protocol}\``)) errors.push("README/release protocol differs from source");
+if (!schema || !readme.includes(`schema 为 **${schema}**`)) errors.push("README SQLite schema differs from source");
 if (errors.length) { console.error(errors.join("\n")); process.exit(1); }
-console.log(`docs: ${files.length} Markdown files checked; local links and current client version references are valid`);
+console.log(`docs: ${files.length} Markdown files checked; local links, download versions, protocol and SQLite schema are valid`);

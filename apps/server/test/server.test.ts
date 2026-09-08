@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
@@ -9,12 +9,18 @@ const token = "codex-assistant-test-token";
 const task = { id: "thread-1", title: "Fix build", status: "active", runtimeStatus: "active", activeFlags: [], freshness: "fresh", source: "thread", plan: [], updatedAt: "2026-09-06T10:00:00.000Z", changedAt: "2026-09-06T10:00:00.000Z" } as const;
 const event = { protocolVersion: "codex-assistant.v2", deviceId: "device-1", localSequence: 1, occurredAt: "2026-09-06T10:00:00.000Z", trace: { traceId: "0123456789abcdef0123456789abcdef", spanId: "0123456789abcdef" }, task };
 const running: Array<Awaited<ReturnType<typeof createApp>>> = [];
+const directories: string[] = [];
 
-afterEach(async () => { for (const server of running.splice(0)) await server.close(); });
+afterEach(async () => {
+  for (const server of running.splice(0)) await server.close();
+  // 先关闭 SQLite/WS，再删除本用例创建的临时目录，避免回归测试持续留下数据库。
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
+});
 
 describe("codex assistant server", () => {
   it("initializes schema, ingests idempotently, and returns snapshots", async () => {
     const dir = await mkdtemp(join(tmpdir(), "codex-assistant-test-"));
+    directories.push(dir);
     const server = await createApp({ databasePath: join(dir, "state.sqlite"), accessToken: token, logger: false }); running.push(server);
     const unauthorized = await server.app.inject({ method: "GET", url: "/codex-assistant/api/v2/tasks" });
     expect(unauthorized.statusCode).toBe(401);
@@ -30,6 +36,7 @@ describe("codex assistant server", () => {
 
   it("rejects unknown protocol fields", async () => {
     const dir = await mkdtemp(join(tmpdir(), "codex-assistant-test-"));
+    directories.push(dir);
     const server = await createApp({ databasePath: join(dir, "state.sqlite"), accessToken: token, logger: false }); running.push(server);
     const response = await server.app.inject({ method: "POST", url: "/codex-assistant/api/v2/events", headers: { authorization: `Bearer ${token}` }, payload: { ...event, extra: true } });
     expect(response.statusCode).toBe(422); expect(response.json().code).toBe("validation_failed");
@@ -37,6 +44,7 @@ describe("codex assistant server", () => {
 
   it("accepts idempotent trace batches and rejects malformed spans", async () => {
     const dir = await mkdtemp(join(tmpdir(), "codex-assistant-trace-test-"));
+    directories.push(dir);
     const server = await createApp({ databasePath: join(dir, "state.sqlite"), accessToken: token, logger: false }); running.push(server);
     const span = { traceId: "abcdefabcdefabcdefabcdefabcdefab", spanId: "abcdefabcdefabcd", name: "android.websocket", startedAt: "2026-09-06T10:00:00.000Z", endedAt: "2026-09-06T10:00:00.010Z", attributes: { phase: "open", latencyMs: "10" } };
     const first = await server.app.inject({ method: "POST", url: "/codex-assistant/api/v2/traces/spans", headers: { authorization: `Bearer ${token}` }, payload: { protocolVersion: "codex-assistant.v2", spans: [span] } });
@@ -49,6 +57,7 @@ describe("codex assistant server", () => {
 
   it("replays events after a cursor and sends a snapshot", async () => {
     const dir = await mkdtemp(join(tmpdir(), "codex-assistant-test-"));
+    directories.push(dir);
     const server = await createApp({ databasePath: join(dir, "state.sqlite"), accessToken: token, logger: false }); running.push(server);
     await server.app.inject({ method: "POST", url: "/codex-assistant/api/v2/events", headers: { authorization: `Bearer ${token}` }, payload: event });
     await server.app.listen({ host: "127.0.0.1", port: 0 });

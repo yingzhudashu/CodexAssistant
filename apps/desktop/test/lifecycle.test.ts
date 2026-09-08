@@ -1,9 +1,9 @@
-import { mkdtemp, writeFile, appendFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, appendFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { LifecycleReader } from "../src/lifecycle.js";
-import { applyLifecycle } from "../src/monitor.js";
+import { applyLifecycle, ACTIVE_EVIDENCE_MAX_AGE_MS } from "../src/monitor.js";
 import type { TaskSnapshot } from "@codex-assistant/protocol";
 
 const directories: string[] = [];
@@ -60,6 +60,52 @@ it("keeps the state transition time separate from later metadata updates", async
   const result = applyLifecycle(task, await reader.read("thread", path));
   expect(result).toMatchObject({ status: "active", updatedAt: task.updatedAt, changedAt: "2026-09-08T06:00:00.000Z" });
   // 不同 ISO 精度字符串必须按时间比较，不能让字母 Z 的字典序覆盖更晚的毫秒。
-  const millisecond = applyLifecycle({ ...task, updatedAt: "2026-09-08T06:00:00Z" }, { turnId: "turn-1", turn: { status: "completed" }, updatedAt: "2026-09-08T06:00:00.500Z" });
+  const millisecond = applyLifecycle({ ...task, updatedAt: "2026-09-08T06:00:00Z" }, { turnId: "turn-1", turn: { status: "completed" }, updatedAt: "2026-09-08T06:00:00.500Z", evidenceAt: "2026-09-08T06:00:00.500Z" });
   expect(millisecond.updatedAt).toBe("2026-09-08T06:00:00.500Z");
+});
+
+const baseTask: TaskSnapshot = { id: "thread", title: "Task", runtimeStatus: "notLoaded", status: "idle", activeFlags: [], latestTurn: { status: "interrupted" }, source: "thread", freshness: "fresh", plan: [], updatedAt: "2026-09-08T06:00:00Z", changedAt: "2026-09-08T06:00:00Z" };
+
+it("expires abandoned starts at cold startup and on repeated projection without changing source times", async () => {
+  const { path, reader } = await fixture(event("task_started"));
+  const time = Date.parse(baseTask.updatedAt);
+  await utimes(path, time / 1000, time / 1000);
+  const lifecycle = await reader.read("thread", path);
+  const active = applyLifecycle(baseTask, lifecycle, time + 1);
+  expect(active).toMatchObject({ status: "active", freshness: "fresh" });
+  const expired = applyLifecycle(baseTask, lifecycle, time + ACTIVE_EVIDENCE_MAX_AGE_MS);
+  expect(expired).toMatchObject({ status: "idle", freshness: "stale", latestTurn: { status: "inProgress" }, error: { code: "ACTIVE_EVIDENCE_EXPIRED" } });
+  expect(expired.changedAt).toBe(active.changedAt);
+  expect(expired.updatedAt).toBe(active.updatedAt);
+  expect(baseTask.latestTurn?.status).toBe("interrupted");
+  expect(applyLifecycle(baseTask, await new LifecycleReader().read("thread", path), time + 10 * ACTIVE_EVIDENCE_MAX_AGE_MS).status).toBe("idle");
+});
+
+it("keeps long tasks active while their file is updated, without reviving completed or aborted turns", async () => {
+  const { path, reader } = await fixture(event("task_started"));
+  const time = Date.parse(baseTask.updatedAt) + 24 * 60 * 60_000;
+  await utimes(path, time / 1000, time / 1000);
+  expect(applyLifecycle(baseTask, await reader.read("thread", path), time + 1000).status).toBe("active");
+  await appendFile(path, event("task_complete", "turn-1", 1));
+  expect(applyLifecycle(baseTask, await reader.read("thread", path), time + 10 * ACTIVE_EVIDENCE_MAX_AGE_MS).status).toBe("complete");
+  await appendFile(path, event("task_started", "turn-2", 2) + event("turn_aborted", "turn-2", 3));
+  expect(applyLifecycle(baseTask, await reader.read("thread", path), time).status).toBe("idle");
+});
+
+it("does not let old or invalid evidence override official activity or Goal constraints", async () => {
+  const { path, reader } = await fixture(event("task_started"));
+  const lifecycle = (await reader.read("thread", path))!;
+  const now = Date.parse(lifecycle.evidenceAt) + ACTIVE_EVIDENCE_MAX_AGE_MS;
+  for (const evidenceAt of [lifecycle.evidenceAt, "invalid", new Date(now + 60_000).toISOString()]) {
+    const evidence = { ...lifecycle, evidenceAt };
+    expect(applyLifecycle(baseTask, evidence, now).status).toBe("idle");
+    const official: TaskSnapshot = { ...baseTask, runtimeStatus: "active", status: "waiting", activeFlags: ["waitingOnApproval"] };
+    expect(applyLifecycle(official, evidence, now)).toBe(official);
+    for (const status of ["paused", "blocked", "complete", "usage_limited", "budget_limited", "active"] as const) {
+      const task = { ...baseTask, goal: { objective: "Goal", status, tokensUsed: 0, timeUsedSeconds: 0 } };
+      const result = applyLifecycle(task, evidence, now);
+      expect(result.status).toBe(status === "active" ? "idle" : status);
+      expect(result.goal?.status).toBe(status);
+    }
+  }
 });

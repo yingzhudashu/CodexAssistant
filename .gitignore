@@ -2,7 +2,13 @@ node_modules/
 dist/
 build/
 test-results/
+coverage/
+playwright-report/
 .env
+.env.*
+!.env.example
+*.tmp
+*.blockmap
 *.db
 *.db-shm
 *.db-wal

@@ -1,7 +1,7 @@
 import { open, type FileHandle } from "node:fs/promises";
 import type { LatestTurn } from "@codex-assistant/protocol";
 
-export type Lifecycle = { turnId: string; turn: LatestTurn; updatedAt: string };
+export type Lifecycle = { turnId: string; turn: LatestTurn; updatedAt: string; /** rollout 文件最近被写入的时间，仅用于本地新鲜度判断 */ evidenceAt: string };
 type Cursor = {
   path: string; identity: string; offset: number; mtime: number; pending: Buffer;
   latest?: Lifecycle; search?: { end: number; position: number; suffix: Buffer };
@@ -24,7 +24,7 @@ export function lifecycleEvent(line: string): Lifecycle | undefined {
     ...(p.type === "task_started" ? { startedAt: updatedAt } : { completedAt: updatedAt }),
     ...(status === "failed" ? { error: { code: "TURN_FAILED", message: "回合执行失败" } } : {}),
   };
-  return { turnId: p.turn_id, turn, updatedAt };
+  return { turnId: p.turn_id, turn, updatedAt, evidenceAt: updatedAt };
 }
 
 function reduce(previous: Lifecycle | undefined, next: Lifecycle): Lifecycle {
@@ -104,7 +104,7 @@ export class LifecycleReader {
       }
       cursor.mtime = stat.mtimeMs;
       if (cursor.offset < stat.size) throw new Error("LIFECYCLE_CATCHING_UP");
-      return cursor.latest;
+      return cursor.latest ? { ...cursor.latest, evidenceAt: new Date(stat.mtimeMs).toISOString() } : undefined;
     } finally { await file.close(); }
   }
 

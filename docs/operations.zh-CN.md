@@ -23,9 +23,9 @@ Nginx 必须保留 `/codex-assistant/` 前缀，并为 `/api/v2/stream` 设置 W
 
 ## CodexAssistant 发布
 
-在 Windows 工作区执行 `scripts/deploy-production.ps1`。脚本使用 `/opt/node-v22.23.2-linux-x64/bin/node`，生产 release 位于 `/opt/codex-assistant/releases`，状态位于 `/var/lib/codex-assistant`，并把 Nginx location 原子纳入现有 `server.example.com` server 块。首次部署后用 `sudo cat /etc/codex-assistant/codex-assistant.env` 在受控终端取得 Token，不要复制到文档、日志或聊天记录。
+在 Windows 工作区执行 `scripts/deploy-production.ps1`。脚本使用 `/opt/node-v22.23.2-linux-x64/bin/node`，生产 release 位于 `/opt/codex-assistant/releases`，状态位于 `/var/lib/codex-assistant`。current 符号链接原子切换；Nginx 主配置由脚本直接写入并在 reload 前执行 nginx -t，不能视为配置文件原子更新。首次部署后用 `sudo cat /etc/codex-assistant/codex-assistant.env` 在受控终端取得 Token，不要复制到文档、日志或聊天记录。
 
-部署默认入口为 `/codex-assistant/`，服务监听 `127.0.0.1:3240`；上线后必须由运维人员实际检查 health。通知模式为 Android 前台服务：设备端由系统保活 WebSocket，并在任务状态或计划步骤变化时生成本地通知，不依赖第三方推送账号。
+部署默认入口为 `/codex-assistant/`，服务监听 `127.0.0.1:3240`；上线后必须实际检查 health 和一条任务同步链路。health 成功不等于桌面鉴权、outbox 上传或 Android WebSocket 已正常。通知模式为 Android 前台服务，由设备系统管理后台执行；任务状态或计划步骤变化生成本地通知，不依赖第三方推送账号。
 
 Android 当前版本由 `android/app/build.gradle.kts` 的 `versionName` 与 `versionCode` 定义，发布脚本会从源码读取。发布目录中的 APK 必须由本次构建生成，并通过签名和 SHA-256 校验后再上传。
 
@@ -43,12 +43,13 @@ Android 当前版本由 `android/app/build.gradle.kts` 的 `versionName` 与 `ve
 
 ## 客户端故障排查
 
-- Windows 正在执行却显示空闲：先确认已安装 2.0.4。`notLoaded` 是独立 app-server 的观测结果；任务展示状态还需查看本机会话的最近回合。读取不可用时显示缓存，不猜测执行失败。
+- Windows 正在执行却显示空闲：先确认已安装 2.0.5。`notLoaded` 是独立 app-server 的观测结果；任务展示状态还需查看本机会话的最近回合。如果错误代码为 `ACTIVE_EVIDENCE_EXPIRED`，说明尚未结束的回合超过 5 分钟没有文件写入证据或文件时间异常；长时间静默执行可能进入此待确认状态，不能理解为已证实停止。
+- 历史任务误报运行中：安装 Windows 2.0.5，保持采集器运行直至完成扫描与上传。过期的历史开始标记会改为 idle/stale，明确提示运行状态待确认；缓存和读取失败路径都会重新判断有效期。Android 消费修正后的快照即可，无需重装 APK 或重置服务端数据库。
 - Android 检查更新：需要可访问 `/codex-assistant/downloads/manifest.json`。网络请求在 IO 线程，版本按 Android versionCode 判断，下载按钮交给系统浏览器。
 - Android 认证失败：检查 Token 是否完整。认证失败与网络断开分别显示，不进行无意义重试；修改配置并保存后重新认证。
 - 任务变化通知：标题以变化后的中文状态开头，正文显示前后状态，展开后包含任务及当前步骤。连续变化在十秒内静默更新最终状态。
 - Trace 保留：启动及每千次写入后清理到最近 100,000 条，不删除业务事件，不缩小已经分配的 SQLite 文件。
-- 时间相差八小时：安装 2.0.4 后，任务时间按设备时区显示。检查时间右侧偏移量：中国标准时间应为 +08:00 / GMT+8。如果设备本身设为 GMT，应在系统设置修正时区；应用不自行猜测时区。
+- 时间相差八小时：当前 Windows 2.0.5 / Android 2.0.4 均按设备时区显示任务时间。检查时间右侧偏移量：中国标准时间应为 +08:00 / GMT+8。如果设备本身设为 GMT，应在系统设置修正时区；应用不自行猜测时区。
 - 任务时间没有每两秒变化：任务更新时间只随来源数据变化，状态变化时间只随生命周期变化。应区分任务时间和 Windows 底部的最后采集时间。
 
 ## 本地状态恢复
@@ -56,3 +57,14 @@ Android 当前版本由 `android/app/build.gradle.kts` 的 `versionName` 与 `ve
 Windows 连接保存在 Electron userData 下的 connection.json，待上传事件位于 state/outbox.json。当前启动逻辑在 OUTBOX_INVALID 时删除 outbox 并从空队列重建；未上传事件和本地序号可能丢失。服务端以设备 ID 与本地序号幂等，序号重置可能命中已有记录，因此不能用删除 outbox 作为常规修复手段。凭据格式不正确时，重新保存配置也会删除旧连接文件再生成当前格式，不存在字段迁移。
 
 Android 在 Keystore 数据损坏时清除不可恢复 Token 和 cursor，让用户重新配置。Token 长度至少 16 个字符；粘贴后确认没有前后空白或缺失字符。恢复连接后先接收快照再启用变化通知。
+
+## 服务端环境变量
+
+| 变量 | 开发入口默认值 | 用途 |
+| --- | --- | --- |
+| CODEX_ASSISTANT_HOST | 127.0.0.1 | 监听地址 |
+| CODEX_ASSISTANT_PORT | 3240 | HTTP/WebSocket 共用端口 |
+| CODEX_ASSISTANT_STATE_DIR | /var/lib/codex-assistant | SQLite 所在目录；Windows 开发需显式设置 |
+| CODEX_ASSISTANT_ACCESS_TOKEN | 无有效默认值 | 少于 16 个字符时拒绝启动 |
+
+桌面 CODEX_BIN 仅覆盖官方 Codex 可执行文件位置。不要将连接 Token 写入项目文件或命令历史。清理开发产物使用 `npm run clean`；该命令不清除业务状态，也不代替 outbox 恢复操作。
