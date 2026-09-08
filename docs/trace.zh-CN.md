@@ -19,4 +19,6 @@ trace 是诊断数据，不是业务状态来源。任务状态仍以 SQLite 的
 
 Android span 链以 WebSocket 连接为单位，任务状态里保留收到的事件 Trace ID，但解码 span 没有自动接续桌面事件父子关系。待上传队列最多 100 条，溢出丢弃最旧诊断数据；父 span 索引当前未设上限。桌面本地日志追加任务串行执行，上传缓冲最多 100 条，但本地追加队列没有显式上限。
 
-桌面/Android 上传失败不会阻断任务接收；服务端部分业务路径同步调用 recordSpan，尚未全面隔离 Trace 写入异常。当前不能宣称“任意 Trace 故障都不影响主链路”。
+Android Trace 上传运行在独立 IO 协程；桌面会在业务上传之后等待 Trace 请求，异常被捕获，但最多 5 秒超时仍可能延长当前轮询。服务端部分业务路径同步调用 recordSpan，尚未全面隔离 Trace 写入异常。当前不能宣称“任意 Trace 故障都不影响主链路”。
+
+排查运行误报时，先核对 task.status、freshness 和 error.code，再使用事件的 trace ID 查询上传链路；ACTIVE_EVIDENCE_EXPIRED 属于采集证据过期，不是 Trace 写入失败。内部 evidenceAt 仅用于本地文件新鲜度判断，不在 Trace 或任务协议中传输。

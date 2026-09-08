@@ -11,6 +11,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "clean": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/clean-workspace.ps1",
     "build": "npm run build --workspace=@codex-assistant/protocol && npm run build --workspace=@codex-assistant/server && npm run build --workspace=@codex-assistant/desktop",
     "test": "npm run build --workspace=@codex-assistant/protocol && vitest run",
     "check:docs": "node scripts/check-docs.mjs",
