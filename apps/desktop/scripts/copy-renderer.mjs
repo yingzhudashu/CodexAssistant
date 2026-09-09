@@ -1,6 +1,10 @@
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = dirname(fileURLToPath(import.meta.url));
 await mkdir(join(root, "../dist/renderer"), { recursive: true });
 await cp(join(root, "../src/renderer"), join(root, "../dist/renderer"), { recursive: true });
+const tray = await readFile(join(root, "../assets/tray.ico"));
+if (tray.length < 22 || tray.readUInt16LE(0) !== 0 || tray.readUInt16LE(2) !== 1 || tray.readUInt16LE(4) < 1) throw new Error("TRAY_ICON_INVALID");
+await mkdir(join(root, "../dist/assets"), { recursive: true });
+await cp(join(root, "../assets/tray.ico"), join(root, "../dist/assets/tray.ico"));

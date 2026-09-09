@@ -4,10 +4,15 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { IngestEvent, TaskSnapshot } from "@codex-assistant/protocol";
 import { Monitor, ACTIVE_EVIDENCE_MAX_AGE_MS, IN_PROGRESS_ITEM_MAX_AGE_MS } from "../src/monitor.js";
+import type { AppServerNotification } from "../src/app-server.js";
 
-const mock = vi.hoisted(() => ({ path: "", reads: 0, activeItem: true, revision: 0 }));
+const mock = vi.hoisted(() => ({ path: "", reads: 0, activeItem: true, revision: 0, failResume: false, notify: undefined as ((value: AppServerNotification) => void) | undefined }));
 vi.mock("../src/app-server.js", () => ({
   CodexAppServer: class {
+    constructor(options: { onNotification: (value: AppServerNotification) => void }) { mock.notify = options.onNotification; }
+    get ready() { return true; }
+    async resumeThread() { if (mock.failResume) throw new Error("RESUME_FAILED"); }
+    async startTurn() {}
     async start() {} async stop() {} setTraceContext() {}
     async listThreads() { return [{ id: "thread", path: mock.path, status: { type: "notLoaded" }, updatedAt: "2026-09-08T06:00:00Z" }]; }
     async readThread() { mock.reads++; return {}; }
@@ -17,6 +22,29 @@ vi.mock("../src/app-server.js", () => ({
     latestTurn() { return undefined; } planFor() { return undefined; } planRevision() { return mock.revision; }
   },
 }));
+
+it("releases failed resume and local IPC terminal locks without a cloud control socket", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-send-"));
+  const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://monitor.invalid", token: "test", deviceId: "test-device", onTasks: () => {} });
+  try {
+    mock.failResume = true;
+    await expect(monitor.sendMessage("thread", "first")).rejects.toThrow("RESUME_FAILED");
+    mock.failResume = false;
+    await expect(monitor.sendMessage("thread", "retry")).resolves.toEqual({ status: "started" });
+    mock.notify?.({ method: "item/completed", params: { threadId: "thread" } });
+    await expect(monitor.sendMessage("thread", "duplicate")).rejects.toThrow("MESSAGE_IN_FLIGHT");
+    mock.notify?.({ method: "turn/completed", params: { threadId: "thread" } });
+    await expect(monitor.sendMessage("thread", "next turn")).resolves.toEqual({ status: "started" });
+  } finally { mock.failResume = false; await monitor.stop(); await rm(directory, { recursive: true, force: true }); }
+});
+
+it("maps a concatenated outbox JSON file to the recoverable invalid-queue error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-outbox-corrupt-"));
+  try {
+    await writeFile(join(directory, "outbox.json"), '{"deviceId":"test-device"}\n{"deviceId":"test-device"}\n');
+    await expect(Monitor.create({ stateDirectory: directory, apiUrl: "https://monitor.invalid", token: "test", deviceId: "test-device", onTasks: () => {} })).rejects.toThrow("OUTBOX_INVALID");
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 it("reprojects unchanged metadata, expires cached evidence on read failure, and uploads recovery and completion", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-monitor-"));

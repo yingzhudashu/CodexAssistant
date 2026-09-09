@@ -7,6 +7,7 @@ import type { TraceContext, TraceSpan } from "@codex-assistant/protocol";
 
 type RpcResponse = { id?: number; result?: unknown; error?: { message?: string } };
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
+export type AppServerNotification = { method: string; params: Record<string, unknown> };
 
 export type AppServerThread = {
   id: string; path?: string | null; name?: string; preview?: string; cwd?: string; status?: string | { type?: string; activeFlags?: string[] }; updatedAt?: string | number;
@@ -50,6 +51,8 @@ function resolveCodexCommand(): string {
 /** 官方 app-server 的最小 JSON-RPC 客户端。所有请求都有超时，避免一个悬挂 RPC 卡死整个轮询。 */
 export class CodexAppServer {
   #child?: ChildProcessWithoutNullStreams;
+  #ready = false;
+  #starting?: Promise<void>;
   #lines?: Interface;
   #nextId = 1;
   #pending = new Map<number, Pending>();
@@ -60,16 +63,27 @@ export class CodexAppServer {
   #onSpan?: (span: TraceSpan) => void;
   #onLog?: (message: string) => void;
   #lastStartFailureAt = 0;
+  #onNotification?: (notification: AppServerNotification) => void;
 
-  constructor(options: { onSpan?: (span: TraceSpan) => void; onLog?: (message: string) => void } = {}) {
+  constructor(options: { onSpan?: (span: TraceSpan) => void; onLog?: (message: string) => void; onNotification?: (notification: AppServerNotification) => void } = {}) {
     this.#onSpan = options.onSpan;
     this.#onLog = options.onLog;
+    this.#onNotification = options.onNotification;
   }
 
   setTraceContext(context: TraceContext | undefined): void { this.#activeTrace = context; }
 
+  get ready(): boolean { return this.#ready; }
+
   async start(): Promise<void> {
-    if (this.#child) return;
+    if (this.#starting) return this.#starting;
+    if (this.#ready && this.#child) return;
+    const starting = this.#initialize();
+    this.#starting = starting;
+    try { await starting; } finally { if (this.#starting === starting) this.#starting = undefined; }
+  }
+
+  async #initialize(): Promise<void> {
     if (Date.now() - this.#lastStartFailureAt < 1_000) throw new Error("APP_SERVER_RESTART_BACKOFF");
     this.#plans.clear();
     this.#threadStatuses.clear();
@@ -82,11 +96,13 @@ export class CodexAppServer {
       this.#child.stderr.setEncoding("utf8");
       this.#child.stderr.on("data", (chunk) => this.#onLog?.(`app-server stderr: ${String(chunk).trim().slice(0, 1000)}`));
       this.#child.once("error", (error) => {
+        this.#ready = false;
         this.#onLog?.(`app-server error: ${error.message}`);
         for (const pending of this.#pending.values()) { clearTimeout(pending.timer); pending.reject(new Error("APP_SERVER_SPAWN_FAILED")); }
         this.#pending.clear();
       });
       this.#child.once("exit", (code, signal) => {
+        this.#ready = false;
         this.#onLog?.(`app-server exited code=${code ?? "null"} signal=${signal ?? "null"}`);
         this.#lastStartFailureAt = Date.now();
         this.#child = undefined;
@@ -96,6 +112,7 @@ export class CodexAppServer {
       });
       await this.request("initialize", { clientInfo: { name: "codex-assistant", version: "2.0.6" } }, INITIALIZE_TIMEOUT_MS);
       this.notify("initialized", {});
+      this.#ready = true;
     } catch (error) {
       this.#lastStartFailureAt = Date.now();
       await this.stop();
@@ -104,6 +121,7 @@ export class CodexAppServer {
   }
 
   async stop(): Promise<void> {
+    this.#ready = false;
     this.#lines?.close();
     this.#child?.kill();
     this.#child = undefined;
@@ -152,9 +170,16 @@ export class CodexAppServer {
   }
 
   async readThread(idValue: string): Promise<unknown> { return this.request("thread/read", { threadId: idValue }); }
-  async listTurns(idValue: string): Promise<unknown> { return this.request("thread/turns/list", { threadId: idValue, limit: 20, itemsView: "summary", sortDirection: "desc" }); }
+  async listTurns(idValue: string, cursor?: string): Promise<unknown> { return this.request("thread/turns/list", { threadId: idValue, limit: 20, itemsView: "summary", sortDirection: "desc", cursor: cursor ?? null }); }
   latestTurn(idValue: string): unknown | undefined { return this.#latestTurns.get(idValue); }
-  async listItems(idValue: string): Promise<unknown> { return this.request("thread/items/list", { threadId: idValue, limit: 100, sortDirection: "desc" }); }
+  async listItems(idValue: string, cursor?: string): Promise<unknown> { return this.request("thread/items/list", { threadId: idValue, limit: 100, sortDirection: "desc", cursor: cursor ?? null }); }
+  async resumeThread(idValue: string): Promise<unknown> { return this.request("thread/resume", { threadId: idValue, excludeTurns: true }); }
+  async startTurn(idValue: string, text: string): Promise<unknown> {
+    return this.request("turn/start", { threadId: idValue, input: [{ type: "text", text }] });
+  }
+  async steerTurn(idValue: string, turnId: string, text: string): Promise<unknown> {
+    return this.request("turn/steer", { threadId: idValue, expectedTurnId: turnId, input: [{ type: "text", text }] });
+  }
   planFor(threadId: string): AppServerPlanStep[] | undefined { return this.#plans.get(threadId)?.steps; }
   planRevision(threadId: string): number { return this.#plans.get(threadId)?.revision ?? 0; }
   async getGoal(idValue: string): Promise<AppServerGoal | undefined> {
@@ -171,6 +196,7 @@ export class CodexAppServer {
     if (line.length > MAX_JSON_LINE) { this.#onLog?.("app-server response exceeded 2 MiB"); return; }
     let message: RpcResponse & { method?: string; params?: unknown };
     try { message = JSON.parse(line) as RpcResponse & { method?: string; params?: unknown }; } catch { this.#onLog?.("app-server emitted invalid JSON"); return; }
+    if (message.method && message.params && typeof message.params === "object") this.#onNotification?.({ method: message.method, params: message.params as Record<string, unknown> });
     if (message.method === "thread/status/changed") {
       const params = message.params as { threadId?: unknown; status?: unknown };
       if (typeof params.threadId === "string" && params.status && typeof params.status === "object") this.#threadStatuses.set(params.threadId, params.status as AppServerThread["status"]);

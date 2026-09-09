@@ -17,7 +17,10 @@ function assertTrustedSender(event: Electron.IpcMainInvokeEvent): void {
   if (!url || (!url.startsWith("file://") && !url.startsWith("http://127.0.0.1") && !url.startsWith("http://localhost"))) throw new Error("DESKTOP_IPC_SENDER_DENIED");
 }
 function createWindow(): BrowserWindow {
-  const next = new BrowserWindow({ width: 430, height: 700, minWidth: 360, minHeight: 480, show: false, resizable: true, webPreferences: { preload: join(import.meta.dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  // The desktop contract is a Windows workstation window. 430px remains a
+  // supported compact monitoring width, but the first window must be useful at
+  // the documented 1100x760 workstation size.
+  const next = new BrowserWindow({ icon: join(import.meta.dirname, "assets", "tray.ico"), width: 1100, height: 760, minWidth: 430, minHeight: 600, show: false, resizable: true, webPreferences: { preload: join(import.meta.dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   void next.loadFile(join(import.meta.dirname, "renderer", "index.html")).catch((error: unknown) => {
     console.error("CodexAssistant renderer load failed", error);
     if (!next.isDestroyed()) next.show();
@@ -35,8 +38,9 @@ function showWindow(): void {
   window.focus();
 }
 function createTray(): void {
-  const iconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#163b32"/><path d="M46 18.5A22 22 0 1 0 46 45" fill="none" stroke="#79e0bc" stroke-width="7" stroke-linecap="round"/><circle cx="44" cy="32" r="5" fill="#f3c878"/></svg>';
-  tray = new Tray(nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(iconSvg).toString("base64")}`));
+  const image = nativeImage.createFromPath(join(import.meta.dirname, "assets", "tray.ico"));
+  if (image.isEmpty()) throw new Error("TRAY_ICON_INVALID");
+  tray = new Tray(image);
   tray.setToolTip("CodexAssistant");
   tray.setContextMenu(Menu.buildFromTemplate([{ label: "打开 CodexAssistant", click: showWindow }, { label: "退出", click: () => app.quit() }]));
   tray.on("double-click", showWindow);
@@ -58,10 +62,13 @@ async function startMonitor(): Promise<void> {
 function registerIpc(): void {
   ipcMain.handle("connection.get", async (event) => { assertTrustedSender(event); const value = await loadDesktopConnection(); return { configured: value.configured, apiUrl: value.apiUrl, deviceId: value.deviceId }; });
   ipcMain.handle("connection.save", async (event, input: unknown) => { assertTrustedSender(event); if (!input || typeof input !== "object") throw new Error("DESKTOP_CONNECTION_INVALID"); const value = input as Record<string, unknown>; if (typeof value.apiUrl !== "string" || typeof value.token !== "string") throw new Error("DESKTOP_CONNECTION_INVALID"); await monitor?.stop(); monitor = undefined; const saved = await saveDesktopConnection({ apiUrl: value.apiUrl, token: value.token }); await startMonitor(); return { configured: saved.configured, apiUrl: saved.apiUrl, deviceId: saved.deviceId }; });
+  ipcMain.handle("task.detail", async (event, input: unknown) => { assertTrustedSender(event); if (!monitor || !input || typeof input !== "object" || typeof (input as { threadId?: unknown }).threadId !== "string") throw new Error("TASK_INVALID"); return monitor.readDetail((input as { threadId: string }).threadId, typeof (input as { cursor?: unknown }).cursor === "string" ? (input as { cursor: string }).cursor : undefined); });
+  ipcMain.handle("task.send", async (event, input: unknown) => { assertTrustedSender(event); if (!monitor || !input || typeof input !== "object") throw new Error("MESSAGE_INVALID"); const value = input as Record<string, unknown>; if (typeof value.threadId !== "string" || typeof value.text !== "string") throw new Error("MESSAGE_INVALID"); return monitor.sendMessage(value.threadId, value.text); });
   ipcMain.handle("update.check", async (event) => { assertTrustedSender(event); const connection = await loadDesktopConnection(); if (!connection.apiUrl) throw new Error("DESKTOP_NOT_CONFIGURED"); const response = await fetch(`${connection.apiUrl}/codex-assistant/downloads/manifest.json`, { signal: AbortSignal.timeout(8_000) }); if (!response.ok) throw new Error("UPDATE_CHECK_FAILED"); const manifest = await response.json() as { version?: unknown; downloads?: { windows?: { url?: unknown }; android?: { url?: unknown } } }; const version = typeof manifest.version === "string" ? manifest.version : ""; return { currentVersion: app.getVersion(), latestVersion: version, available: Boolean(version && version !== app.getVersion()), windowsUrl: typeof manifest.downloads?.windows?.url === "string" ? manifest.downloads.windows.url : undefined, androidUrl: typeof manifest.downloads?.android?.url === "string" ? manifest.downloads.android.url : undefined }; });
   ipcMain.handle("update.download", async (event, target: unknown) => { assertTrustedSender(event); if (target !== "windows" && target !== "android") throw new Error("UPDATE_TARGET_INVALID"); const connection = await loadDesktopConnection(); if (!connection.apiUrl) throw new Error("DESKTOP_NOT_CONFIGURED"); const response = await fetch(`${connection.apiUrl}/codex-assistant/downloads/manifest.json`, { signal: AbortSignal.timeout(8_000) }); if (!response.ok) throw new Error("UPDATE_CHECK_FAILED"); const manifest = await response.json() as { downloads?: Record<string, { url?: unknown }> }; const url = manifest.downloads?.[target]?.url; if (typeof url !== "string" || !/^https:\/\//i.test(url)) throw new Error("UPDATE_URL_INVALID"); await shell.openExternal(url); return { opened: true }; });
   ipcMain.handle("tasks.get", (event) => { assertTrustedSender(event); return latestTasks; });
   ipcMain.handle("sync.status", (event) => { assertTrustedSender(event); return monitorStatus; });
+  ipcMain.handle("workstation.status", (event) => { assertTrustedSender(event); return { ready: monitor?.workstationReady === true }; });
 }
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();

@@ -50,3 +50,4 @@ form button { color: var(--accent-ink); background: var(--accent); border-color:
 .detail-plan { display: grid; gap: 7px; margin-top: 13px; color: #d1dbe5; }
 .close { float: right; background: transparent; border-color: var(--line); color: #b7c5d2; padding: 7px 10px; }
 @media (max-width: 620px) { main { padding: 20px 16px 24px; } header { margin-bottom: 22px; } .connection { padding: 7px 9px; } }
+.task-tools{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:16px 0}.task-tools input{min-width:240px;flex:1;padding:10px 12px;border:1px solid #7b8a98;border-radius:8px;background:#fff;color:#17212b}.filters{display:flex;gap:6px;flex-wrap:wrap}.detail-history article{padding:10px 0;border-bottom:1px solid #d9e0e8}.detail-history p{white-space:pre-wrap;overflow-wrap:anywhere}.detail form button[disabled],button[disabled]{opacity:.55;cursor:not-allowed}

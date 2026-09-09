@@ -1,6 +1,7 @@
 package site.codexassistant
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 const val PROTOCOL_VERSION = "codex-assistant.v2"
 
@@ -20,3 +21,7 @@ const val PROTOCOL_VERSION = "codex-assistant.v2"
 @Serializable data class ErrorMessage(val type: String, val protocolVersion: String, val code: String, val message: String)
 @Serializable data class ClientAuthMessage(val type: String = "auth", val protocolVersion: String = PROTOCOL_VERSION, val token: String)
 @Serializable data class ClientSubscribeMessage(val type: String = "subscribe", val protocolVersion: String = PROTOCOL_VERSION, val after: Long)
+@Serializable data class ClientDetailMessage(val type: String = "detail", val protocolVersion: String = PROTOCOL_VERSION, val requestId: String, val threadId: String, val cursor: String? = null, val limit: Int? = 20)
+@Serializable data class ClientSendMessage(val type: String = "send", val protocolVersion: String = PROTOCOL_VERSION, val requestId: String, val threadId: String, val text: String)
+@Serializable data class DetailMessage(val type: String, val protocolVersion: String, val requestId: String, val threadId: String, val turns: List<JsonElement> = emptyList(), val cursor: String? = null)
+@Serializable data class ResultMessage(val type: String, val protocolVersion: String, val requestId: String, val threadId: String, val status: String, val text: String? = null, val error: String? = null)

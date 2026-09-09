@@ -9,6 +9,8 @@ import type { WebSocket } from "ws";
 import {
   ClientAuthMessageSchema,
   ClientSubscribeMessageSchema,
+  ClientDetailMessageSchema,
+  ClientSendMessageSchema,
   IngestEventSchema,
   TraceSpanBatchSchema,
   PROTOCOL_VERSION,
@@ -101,6 +103,8 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
   const database = new TaskDatabase(options.databasePath);
   const app = Fastify({ logger: options.logger ?? true, bodyLimit: 128 * 1024 });
   const subscribers = new Set<WebSocket>();
+  const desktopControllers = new Set<WebSocket>();
+  const pendingRequests = new Map<string, WebSocket>();
   const tracerProvider = new BasicTracerProvider({
     spanProcessors: [new BatchSpanProcessor(new SQLiteSpanExporter(database), { maxQueueSize: 256, maxExportBatchSize: 32, scheduledDelayMillis: 250 })],
   });
@@ -212,7 +216,31 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
         socket.send(JSON.stringify({ type: "authenticated", protocolVersion: PROTOCOL_VERSION } satisfies ServerWebSocketMessage));
         return;
       }
-      if (subscribed) return reject("validation_failed", "Only one subscribe message is allowed");
+      if (subscribed) {
+        const message = payload as Record<string, unknown> | undefined;
+        if (message?.type === "role" && message.role === "desktop") { desktopControllers.add(socket); return; }
+        if (desktopControllers.has(socket)) {
+          if (message?.type === "detail" || message?.type === "result") {
+            const requestId = typeof message.requestId === "string" ? message.requestId : undefined;
+            const target = requestId ? pendingRequests.get(requestId) : undefined;
+            if (target?.readyState === 1) target.send(JSON.stringify(message));
+            if (requestId) pendingRequests.delete(requestId);
+            return;
+          }
+          return reject("validation_failed", "Desktop control message is invalid");
+        }
+        const detail = parseStrict<import("@codex-assistant/protocol").ClientDetailMessage>(ClientDetailMessageSchema, payload);
+        const send = parseStrict<import("@codex-assistant/protocol").ClientSendMessage>(ClientSendMessageSchema, payload);
+        if (detail || send) {
+          const requestId = detail?.requestId ?? send?.requestId;
+          const controller = [...desktopControllers].find((peer) => peer.readyState === 1 && peer.bufferedAmount < 256 * 1024);
+          if (!controller || !requestId) return reject("internal_error", "Desktop controller is offline");
+          pendingRequests.set(requestId, socket);
+          controller.send(JSON.stringify(payload));
+          return;
+        }
+        return reject("validation_failed", "Unsupported control message");
+      }
       const subscribe = parseStrict<import("@codex-assistant/protocol").ClientSubscribeMessage>(ClientSubscribeMessageSchema, payload);
       if (!subscribe) return reject("validation_failed", "Expected codex-assistant.v2 subscribe message");
       subscribed = true;
@@ -222,8 +250,8 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
       socket.send(JSON.stringify({ type: "snapshot", protocolVersion: PROTOCOL_VERSION, cursor: database.cursor(), tasks: database.currentTasks() } satisfies ServerWebSocketMessage));
       database.recordSpan({ ...childTrace(connectionTrace), name: "websocket.subscribe", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), attributes: { replayCount: String(replay.length) } });
     });
-    socket.on("close", () => subscribers.delete(socket));
-    socket.on("error", () => subscribers.delete(socket));
+    socket.on("close", () => { subscribers.delete(socket); desktopControllers.delete(socket); for (const [requestId, target] of pendingRequests) if (target === socket) pendingRequests.delete(requestId); });
+    socket.on("error", () => { subscribers.delete(socket); desktopControllers.delete(socket); });
   });
 
   return {
