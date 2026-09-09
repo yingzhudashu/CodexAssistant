@@ -2,6 +2,9 @@
 
 ## 2026-09-10 前端交互修订对应的实现约束
 
+- 展示层只消费协议字段并进行明确映射：连接状态、任务状态、freshness、回合状态和本机就绪状态分开建模，缺失字段返回“暂未提供”，不把内部枚举直接拼入用户文案。
+- Windows renderer 的消息格式化必须在本地完成且先转义原文；表格、代码块、列表和行内公式只能生成安全的展示节点，不新增远程接口或上传正文。布局断点优先保证详情正文和输入区的可用宽高。
+
 - Android 一级导航只存在于任务首页和设置首页。详情页、设置二级页进入独立页面栈；系统返回先退出输入法/弹层，再按二级页 → 设置首页 → 任务首页逐级返回。
 - Windows 本机控制与云端同步分别建模：`workstation.status.ready` 由 app-server initialize/initialized 握手及退出/停止事件决定；`sync.status` 仅表示采集/上传循环。renderer 使用前者判断本机 IPC 发送，不再把 syncing/offline 当作本机不可用。`task.send` 等待唯一启动 Promise 后执行 resume/start/steer，启动或 resume 失败释放线程发送锁并保留草稿。Android 仍经云端 WebSocket 转发，不改变服务端鉴权和工作站不可达回执。
 - Windows 托盘资源必须从 `apps/desktop/assets/tray.ico` 读取并通过 `nativeImage.createFromPath` 创建；构建时校验文件存在且为有效 ICO，运行时不得回退到透明占位图或 SVG data URL。
