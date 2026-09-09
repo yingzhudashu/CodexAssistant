@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { LifecycleReader } from "../src/lifecycle.js";
-import { applyLifecycle, ACTIVE_EVIDENCE_MAX_AGE_MS } from "../src/monitor.js";
+import { applyLifecycle, ACTIVE_EVIDENCE_MAX_AGE_MS, IN_PROGRESS_ITEM_MAX_AGE_MS } from "../src/monitor.js";
 import type { TaskSnapshot } from "@codex-assistant/protocol";
 
 const directories: string[] = [];
@@ -90,6 +90,15 @@ it("keeps long tasks active while their file is updated, without reviving comple
   expect(applyLifecycle(baseTask, await reader.read("thread", path), time + 10 * ACTIVE_EVIDENCE_MAX_AGE_MS).status).toBe("complete");
   await appendFile(path, event("task_started", "turn-2", 2) + event("turn_aborted", "turn-2", 3));
   expect(applyLifecycle(baseTask, await reader.read("thread", path), time).status).toBe("idle");
+});
+
+it("keeps a silent turn active while its current operation remains in progress", () => {
+  const lifecycle = { turnId: "turn-1", turn: { status: "inProgress" as const }, updatedAt: baseTask.updatedAt, evidenceAt: baseTask.updatedAt };
+  const now = Date.parse(lifecycle.evidenceAt) + ACTIVE_EVIDENCE_MAX_AGE_MS + 1;
+  expect(applyLifecycle(baseTask, lifecycle, now, true)).toMatchObject({ status: "active", freshness: "stale", latestTurn: { status: "inProgress" } });
+  const paused = { ...baseTask, goal: { objective: "Goal", status: "paused" as const, tokensUsed: 0, timeUsedSeconds: 0 } };
+  expect(applyLifecycle(paused, lifecycle, now, true).status).toBe("paused");
+  expect(applyLifecycle(baseTask, lifecycle, Date.parse(lifecycle.evidenceAt) + IN_PROGRESS_ITEM_MAX_AGE_MS, true).status).toBe("idle");
 });
 
 it("does not let old or invalid evidence override official activity or Goal constraints", async () => {

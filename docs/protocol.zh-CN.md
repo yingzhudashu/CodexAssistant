@@ -24,7 +24,7 @@
 
 因此历史 completed Turn 不会盖过当前 active 线程，Goal 为 active 时也不会被等待标志覆盖。动作只允许 `command_execution`、`file_change`、`mcp_call`、`agent_message`，不携带正文。
 
-上述规则用于官方基础状态。本机生命周期投影另有运行证据有效期：当 runtimeStatus 为 notLoaded、历史回合为 inProgress，但文件已达到 5 分钟无写入，展示 status 为 idle、freshness 为 stale、error.code 为 `ACTIVE_EVIDENCE_EXPIRED`；Goal 的非 active 状态仍优先。latestTurn.inProgress 表示历史未结束标记，不能在忽略 freshness 的情况下解释为当前仍运行。恢复写入后重新投影；明确终止记录不会因时间过期而失效。内部 evidenceAt 文件时间不进入协议载荷。
+上述规则用于官方基础状态。本机生命周期投影另有运行证据有效期：当 runtimeStatus 为 notLoaded、历史回合为 inProgress 且文件达到 30 分钟无写入时，没有进行中操作的回合展示 status 为 idle、freshness 为 stale、error.code 为 `ACTIVE_EVIDENCE_EXPIRED`；当前回合仍有 `inProgress` 操作时，在 6 小时内展示 status 为 active、freshness 为 stale 且不产生错误。Goal 的非 active 状态仍优先。latestTurn.inProgress 表示历史未结束标记，不能脱离 freshness 和当前操作状态解释为实时运行。恢复写入后重新投影；明确终止记录不会因时间过期而失效。内部 evidenceAt 和操作证据不进入协议载荷。
 
 ## WebSocket
 

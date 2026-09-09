@@ -21,4 +21,4 @@ Android span 链以 WebSocket 连接为单位，任务状态里保留收到的�
 
 Android Trace 上传运行在独立 IO 协程；桌面会在业务上传之后等待 Trace 请求，异常被捕获，但最多 5 秒超时仍可能延长当前轮询。服务端部分业务路径同步调用 recordSpan，尚未全面隔离 Trace 写入异常。当前不能宣称“任意 Trace 故障都不影响主链路”。
 
-排查运行误报时，先核对 task.status、freshness 和 error.code，再使用事件的 trace ID 查询上传链路；ACTIVE_EVIDENCE_EXPIRED 属于采集证据过期，不是 Trace 写入失败。内部 evidenceAt 仅用于本地文件新鲜度判断，不在 Trace 或任务协议中传输。
+排查运行误报时，先核对 task.status、freshness 和 error.code，再使用事件的 trace ID 查询上传链路；ACTIVE_EVIDENCE_EXPIRED 表示普通回合静默达到 30 分钟，或带进行中操作的回合静默达到 6 小时，不是 Trace 写入失败。内部 evidenceAt 和操作证据仅用于本地判定，不在 Trace 或任务协议中传输。

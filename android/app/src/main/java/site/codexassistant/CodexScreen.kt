@@ -17,6 +17,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,6 +34,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Shapes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.content.Intent
@@ -40,8 +44,35 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
+private val CodexLight = lightColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFF2F7F68),
+    onPrimary = androidx.compose.ui.graphics.Color.White,
+    primaryContainer = androidx.compose.ui.graphics.Color(0xFFD1F1E5),
+    onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFF063B2D),
+    secondary = androidx.compose.ui.graphics.Color(0xFF496475),
+    background = androidx.compose.ui.graphics.Color(0xFFF5F8FA),
+    surface = androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE8EFF2),
+)
+private val CodexDark = darkColorScheme(
+    primary = androidx.compose.ui.graphics.Color(0xFF7DDBB9),
+    onPrimary = androidx.compose.ui.graphics.Color(0xFF00382A),
+    primaryContainer = androidx.compose.ui.graphics.Color(0xFF175C49),
+    onPrimaryContainer = androidx.compose.ui.graphics.Color(0xFFB7F5DC),
+    secondary = androidx.compose.ui.graphics.Color(0xFFAFCBD2),
+    background = androidx.compose.ui.graphics.Color(0xFF0E1518),
+    surface = androidx.compose.ui.graphics.Color(0xFF151E22),
+    surfaceVariant = androidx.compose.ui.graphics.Color(0xFF26353A),
+)
+
 @Composable
-fun CodexTheme(content: @Composable () -> Unit) { MaterialTheme(content = content) }
+fun CodexTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) CodexDark else CodexLight,
+        shapes = Shapes(small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(14.dp), large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(24.dp)),
+        content = content,
+    )
+}
 
 @Composable
 fun CodexScreen(credentials: CredentialStore) {
