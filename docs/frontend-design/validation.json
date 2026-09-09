@@ -1,0 +1,20 @@
+{
+  "project": "CodexAssistant",
+  "screens": 13,
+  "actions": 29,
+  "figures": 57,
+  "issues": [],
+  "image_load": "passed",
+  "validation_date": "2026-09-10",
+  "tool": "Microsoft Edge headless; Python Playwright; XML parser",
+  "semantic_checks": [
+    "source path existence and SHA-256 baseline",
+    "page and action IDs",
+    "all registered layout/action figures exist",
+    "no unreferenced final SVG",
+    "Markdown contiguous tables and column consistency",
+    "HTML table structure and anchors",
+    "local action completion semantics"
+  ],
+  "limits": "Static design checks and visual sampling only; product implementation, device acceptance, every API branch and pixel equivalence are not certified."
+}

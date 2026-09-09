@@ -1,6 +1,6 @@
 # 安装包与发布
 
-当前 Windows 下载版本为 `2.0.6`，Android 为 `2.0.5`；Android `versionCode=8`，协议固定为 `codex-assistant.v2`。各端版本来源分别是 `apps/desktop/package.json` 与 `android/app/build.gradle.kts`。本次运行证据增强在 Windows 采集端生效；Android 直接接收修正快照，服务端协议和数据库无需变更。
+当前 Windows 下载版本为 `2.0.10`，Android 为 `2.0.8`；Android `versionCode=11`，协议固定为 `codex-assistant.v2`。本次修复 Android 二级页导航和返回、统一两端九种状态筛选、分离 Windows 本机就绪与云端同步状态，并改用 ICO 托盘资源。服务端协议与数据库无需变更。
 
 ## 构建
 
@@ -38,3 +38,12 @@ Windows 当前仅比较顶层 version 字符串是否与已安装版本不同，
 当前部署脚本只在记录上一 current 目标后才能自动切回。较早阶段失败时可能移除 current 并停止服务；脚本不会备份恢复 systemd unit 或 Nginx snippet，Nginx 主配置也仅在新增 include 时备份。配置变更前需人工备份上述文件并准备恢复命令，不能依赖脚本完成完整回滚。成功部署保留最近五份服务 release；此策略不清理下载目录中的安装包。
 
 确认安装包已发布后，可用 `npm run clean -- -WhatIf` 查看本地清理范围，再运行 `npm run clean` 删除生成物。源码、版本声明和文档变更提交 Git，二进制包不提交。
+
+
+## 2026-09-10 修复验收
+
+本轮先修订前端规格及架构/协议表示合同，再实现客户端修复。Windows 2.0.10、Android 2.0.8（versionCode 11）已构建。npm回归19项、Android单元测试7项通过；TypeScript/Android编译及release构建通过。设计文档13页、29交互、57幅SVG静态复核无问题。
+
+Electron smoke确认云端syncing时本机发送可用、未就绪时草稿保留；未向真实任务发送测试消息。安装包内ICO字节与源码一致，Electron解码非空。APK内版本与清单一致，v2签名验证通过；Windows仍为NotSigned。物理Android设备返回键/输入法行为、Windows安装后托盘显示及真实任务发送未作端到端验收。
+
+本轮不新增公网接口或数据库字段，服务器无需重新部署客户端IPC改动；发布仅更新CodexAssistant独立下载区。公网完整下载校验记录位于本地artifacts/verification/publication-check.json；图稿和源码静态复核记录位于docs/frontend-design/validation.json。

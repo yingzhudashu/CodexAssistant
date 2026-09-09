@@ -7,6 +7,19 @@ import java.time.format.DateTimeParseException
 
 private val taskTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss xxx")
 
+val taskStatusFilters = listOf(
+    "all" to "全部",
+    "active" to "进行中",
+    "waiting" to "等待处理",
+    "paused" to "已暂停",
+    "blocked" to "已阻塞",
+    "usage_limited" to "用量受限",
+    "budget_limited" to "预算受限",
+    "idle" to "空闲",
+    "complete" to "已完成",
+    "failed" to "失败",
+)
+
 /** 协议传输 UTC，界面才按设备时区转换；保留日期和偏移量，不能删掉 Z 后当成本地时间。 */
 fun formatTime(value: String, zone: ZoneId = ZoneId.systemDefault()): String = try {
     taskTimeFormatter.withZone(zone).format(Instant.parse(value))

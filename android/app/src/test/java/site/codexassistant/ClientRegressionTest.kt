@@ -14,6 +14,23 @@ import org.junit.Test
 import java.util.concurrent.Executors
 
 class ClientRegressionTest {
+    @Test fun secondaryPagesReturnToSettingsAndHideRootNavigation() {
+        for (page in listOf("connection", "appearance", "notifications", "about")) {
+            assertFalse(showPrimaryNavigation(page, null, false))
+            assertEquals("settings", parentPage(page))
+            assertEquals("tasks", parentPage(parentPage(page)))
+        }
+        assertTrue(showPrimaryNavigation("tasks", null, false))
+        assertTrue(showPrimaryNavigation("settings", null, false))
+        assertFalse(showPrimaryNavigation("tasks", "task-1", false))
+        assertFalse(showPrimaryNavigation("tasks", null, true))
+    }
+
+    @Test fun everyProtocolTaskStateCanBeFilteredUsingItsNotificationLabel() {
+        val statuses = listOf("active", "waiting", "paused", "blocked", "usage_limited", "budget_limited", "idle", "complete", "failed")
+        assertEquals(listOf("all") + statuses, taskStatusFilters.map { it.first })
+        for ((id, label) in taskStatusFilters.drop(1)) assertEquals(statusLabel(id), label)
+    }
     @Test fun taskTimesConvertTheInstantToDeviceTimezoneIncludingDateAndOffset() {
         val china = java.time.ZoneId.of("Asia/Shanghai")
         assertEquals("2026-09-09 00:30:00 +08:00", formatTime("2026-09-08T16:30:00.000Z", china))

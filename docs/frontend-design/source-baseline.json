@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-10",
+  "head": "da6bfbc15282af180808eeb1f875ee0c4f243b78",
+  "working_tree_sha256": {
+    "android/app/src/main/java/site/codexassistant/CodexScreen.kt": "04252f6a8b0e61328c5c9ad119563ea8d6df07d5f03304cd5d1c1acff7a54357",
+    "apps/desktop/src/renderer/app.js": "130e737c46aa14bdbc7e62a8a8acc2ce328fb4bed6f010358eeb3dfa248e0d6c",
+    "apps/desktop/src/desktop-config.ts": "765405ef114b6b24881ea4415ba2326eae1b354b3579891a4d653bf51ac97a4d",
+    "apps/desktop/src/main.ts": "4c23afae457e2a8890c9acb3caf6a3b3b9213218d195f71e4b84a8d9086abfe5",
+    "packages/protocol/src/index.ts": "33ea546511c98847d25dcf3545cfd45d600f10bd12460ab9c37612e1dcbbe577",
+    "apps/server/src/app.ts": "7b0dfb52abafd8a394e5ae694d37e91b08eac675ca387958e78e668087025e1a",
+    "apps/desktop/src/monitor.ts": "9ccb5b94876eb4de2bb20b827d39e31b35420fae274fd33c44e8bab365c4116a",
+    "apps/desktop/src/renderer/workspace.js": "27c68ab70af3bfeb966a2f5ce659755dc674542c554ce4c5bc845e608b06ceab",
+    "android/app/src/main/java/site/codexassistant/NavigationRules.kt": "15b7e48b273c2046fd69431dd19f3d52f6e5de32f68f30f7fb98967421826e6c",
+    "android/app/src/main/java/site/codexassistant/TaskPresentation.kt": "d04eb12cd2677ed9a0abd400e4e26ba3c892756c467b6fc1885c75eba5d37797",
+    "apps/desktop/src/app-server.ts": "214aed04b464827eceb2031182e74a0aeba0de00228e9ba4b1348c4b2626d0ef"
+  }
+}

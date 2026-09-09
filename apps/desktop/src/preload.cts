@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld("codexAssistant", {
   saveConnection: (input: { apiUrl: string; token: string }) => ipcRenderer.invoke("connection.save", input),
   getTasks: () => ipcRenderer.invoke("tasks.get") as Promise<TaskSnapshot[]>,
   getSyncStatus: () => ipcRenderer.invoke("sync.status") as Promise<"connecting" | "syncing" | "connected" | "offline">,
+  getWorkstationStatus: () => ipcRenderer.invoke("workstation.status") as Promise<{ ready: boolean }>,
+  getTaskDetail: (input: { threadId: string; cursor?: string }) => ipcRenderer.invoke("task.detail", input) as Promise<{ turns: unknown[]; cursor?: string }>,
+  sendTaskMessage: (input: { threadId: string; text: string }) => ipcRenderer.invoke("task.send", input) as Promise<{ status: string }>,
   checkUpdate: () => ipcRenderer.invoke("update.check") as Promise<{ currentVersion: string; latestVersion: string; available: boolean; windowsUrl?: string; androidUrl?: string }>,
   downloadUpdate: (target: "windows" | "android") => ipcRenderer.invoke("update.download", target) as Promise<{ opened: boolean }>,
   onTasks: (listener: (tasks: TaskSnapshot[]) => void) => {

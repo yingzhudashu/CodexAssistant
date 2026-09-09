@@ -3,7 +3,8 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { IngestEvent, PlanStep, TaskSnapshot, TraceContext, TraceSpan } from "@codex-assistant/protocol";
 import { IngestEventSchema, parseStrict } from "@codex-assistant/protocol";
-import { CodexAppServer, type AppServerItem, type AppServerPlanStep, type AppServerThread } from "./app-server.js";
+import { CodexAppServer, type AppServerItem, type AppServerPlanStep, type AppServerThread, type AppServerNotification } from "./app-server.js";
+import WebSocket from "ws";
 import { deriveTaskStatus, fingerprint, normalizeAction, normalizeActiveFlags, normalizeRuntimeStatus, normalizeTurn, projectName, sanitizeText } from "./sanitize.js";
 import { TraceLogger, childTrace, newTraceContext, traceparent } from "./trace.js";
 
@@ -54,6 +55,10 @@ export class Monitor {
   #nextFlushAt = 0;
   #flushAttempt = 0;
   #traceBuffer: TraceSpan[] = [];
+  #controlSocket?: WebSocket;
+  #controlConnected = false;
+  #pendingControl = new Map<string, { threadId: string; text?: string }>();
+  #pendingThreads = new Set<string>();
 
   private constructor(input: { statePath: string; apiUrl: string; token: string; deviceId: string; outbox: StoredOutbox; onTasks: (tasks: TaskSnapshot[]) => void; onStatus: (status: MonitorStatus) => void }) {
     this.#statePath = input.statePath;
@@ -69,6 +74,7 @@ export class Monitor {
       // app-server stderr 可能包含路径、命令或服务端细节。只记录发生了诊断事件，
       // 不将原始文本写进持久化 trace，避免诊断链路成为数据泄露旁路。
       onLog: () => this.#recordSpan({ ...newTraceContext(), name: "app_server.diagnostic", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), attributes: { source: "app_server" } }),
+      onNotification: (notification) => this.#handleNotification(notification),
     });
   }
 
@@ -76,7 +82,13 @@ export class Monitor {
     const path = join(options.stateDirectory, "outbox.json");
     let outbox: StoredOutbox = { deviceId: options.deviceId, nextSequence: 1, events: [], fingerprints: {} };
     try { outbox = JSON.parse(await readFile(path, "utf8")) as StoredOutbox; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    catch (error) {
+      // A partial/concatenated write must use the same recovery path as an
+      // invalid schema.  The main process removes the queue and recreates it
+      // atomically before starting the monitor, instead of surfacing a raw
+      // JSON parser error from connection.save.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("OUTBOX_INVALID");
+    }
     if (outbox.deviceId !== options.deviceId || !Number.isInteger(outbox.nextSequence) || outbox.nextSequence < 1 || !Array.isArray(outbox.events) || outbox.events.length > MAX_OUTBOX_EVENTS || !outbox.fingerprints || typeof outbox.fingerprints !== "object") throw new Error("OUTBOX_INVALID");
     for (const event of outbox.events) {
       const wire = { protocolVersion: event.protocolVersion, deviceId: event.deviceId, localSequence: event.localSequence, occurredAt: event.occurredAt, trace: event.trace, task: event.task };
@@ -89,6 +101,7 @@ export class Monitor {
   async start(): Promise<void> {
     this.#onStatus("connecting");
     await this.#server.start();
+    this.#connectControl();
     await this.#poll();
     this.#timer = setInterval(() => void this.#poll(), 2_000);
   }
@@ -96,8 +109,81 @@ export class Monitor {
   async stop(): Promise<void> {
     if (this.#timer) clearInterval(this.#timer);
     await this.#server.stop();
+    this.#controlSocket?.close();
+    this.#controlSocket = undefined;
     await this.#persist();
     await this.#traceLogger.flush();
+  }
+
+  async readDetail(threadId: string, cursor?: string): Promise<{ turns: unknown[]; cursor?: string }> {
+    await this.#server.start();
+    const value = await this.#server.listTurns(threadId, cursor) as { data?: unknown[]; nextCursor?: string | null };
+    return { turns: Array.isArray(value.data) ? value.data : [], ...(value.nextCursor ? { cursor: value.nextCursor } : {}) };
+  }
+
+  get workstationReady(): boolean { return this.#server.ready; }
+
+  async sendMessage(threadId: string, text: string): Promise<{ status: string }> {
+    if (!text.trim() || text.length > 20_000) throw new Error("MESSAGE_INVALID");
+    if (this.#pendingThreads.has(threadId)) throw new Error("MESSAGE_IN_FLIGHT");
+    this.#pendingThreads.add(threadId);
+    try {
+      await this.#server.start();
+      await this.#server.resumeThread(threadId);
+      const current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
+      if (current?.id && current.status === "inProgress") await this.#server.steerTurn(threadId, current.id, text.trim());
+      else await this.#server.startTurn(threadId, text.trim());
+    } catch (error) {
+      this.#pendingThreads.delete(threadId);
+      throw error;
+    }
+    return { status: "started" };
+  }
+
+  #connectControl(): void {
+    if (this.#controlSocket) return;
+    const url = this.#apiUrl.replace(/^http/, "ws") + "/codex-assistant/api/v2/stream";
+    const socket = new WebSocket(url);
+    this.#controlSocket = socket;
+    socket.on("open", () => { socket.send(JSON.stringify({ type: "auth", protocolVersion: "codex-assistant.v2", token: this.#token })); });
+    socket.on("message", (raw) => {
+      try {
+        const message = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (message.type === "authenticated") { socket.send(JSON.stringify({ type: "subscribe", protocolVersion: "codex-assistant.v2", after: 0 })); socket.send(JSON.stringify({ type: "role", role: "desktop" })); return; }
+        if (message.type === "send" && typeof message.requestId === "string" && typeof message.threadId === "string" && typeof message.text === "string") {
+          this.#pendingControl.set(message.requestId, { threadId: message.threadId });
+          void this.sendMessage(message.threadId, message.text).then(() => socket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v2", requestId: message.requestId, threadId: message.threadId, status: "started" }))).catch((error: unknown) => socket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v2", requestId: message.requestId, threadId: message.threadId, status: "failed", error: error instanceof Error ? error.message.slice(0, 500) : "SEND_FAILED" })));
+          return;
+        }
+        if (message.type === "detail" && typeof message.requestId === "string" && typeof message.threadId === "string") {
+          void this.readDetail(message.threadId, typeof message.cursor === "string" ? message.cursor : undefined).then((detail) => socket.send(JSON.stringify({ type: "detail", protocolVersion: "codex-assistant.v2", requestId: message.requestId, threadId: message.threadId, turns: detail.turns, ...(detail.cursor ? { cursor: detail.cursor } : {}) }))).catch((error: unknown) => socket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v2", requestId: message.requestId, threadId: message.threadId, status: "failed", error: error instanceof Error ? error.message.slice(0, 500) : "DETAIL_FAILED" })));
+        }
+      } catch { /* invalid control frames are ignored */ }
+    });
+    socket.on("close", () => { if (this.#controlSocket === socket) this.#controlSocket = undefined; });
+    socket.on("error", () => undefined);
+  }
+
+  #handleNotification(notification: AppServerNotification): void {
+    const params = notification.params;
+    const threadId = typeof params.threadId === "string" ? params.threadId : undefined;
+    const terminal = notification.method === "turn/completed" || notification.method === "turn/failed" || notification.method === "turn/interrupted";
+    // Local IPC sends have no cloud requestId; release their guard even when
+    // the control socket is absent. Item completion never releases it.
+    if (threadId && terminal) this.#pendingThreads.delete(threadId);
+    if (!threadId || !this.#controlSocket || this.#controlSocket.readyState !== WebSocket.OPEN) return;
+    const pending = [...this.#pendingControl.entries()].find(([, value]) => value.threadId === threadId)?.[0];
+    if (!pending) return;
+    const delta = typeof params.delta === "string" ? params.delta : undefined;
+    // Item completions are not turn completions. Only the turn terminal
+    // notifications release the one-in-flight guard and resolve the control
+    // request; otherwise a tool item could prematurely close the composer.
+    const status = terminal ? (notification.method === "turn/completed" ? "completed" : "failed") : delta ? "streaming" : "started";
+    this.#controlSocket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v2", requestId: pending, threadId, status, ...(delta ? { text: delta.slice(0, 20_000) } : {}), ...(status === "completed" || status === "failed" ? {} : {}) }));
+    if (terminal) {
+      this.#pendingControl.delete(pending);
+      this.#pendingThreads.delete(threadId);
+    }
   }
 
   async #poll(): Promise<void> {
@@ -110,6 +196,14 @@ export class Monitor {
     try {
       await this.#server.start();
       const threads = await this.#server.listThreads();
+      // IPC sends do not have a control requestId. Reconcile their guard from
+      // the authoritative turn state on the next poll so a completed turn can
+      // be followed by another send while item notifications are still being
+      // emitted.
+      for (const threadId of this.#pendingThreads) {
+        const status = this.#server.latestTurn(threadId) as { status?: unknown } | undefined;
+        if (status?.status === "completed" || status?.status === "failed" || status?.status === "interrupted") this.#pendingThreads.delete(threadId);
+      }
       const seen = new Set(threads.map((thread) => thread.id));
       this.#lifecycle.retain(seen);
       for (const id of this.#threadCache.keys()) if (!seen.has(id)) { this.#threadCache.delete(id); this.#inProgressItems.delete(id); }

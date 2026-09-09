@@ -8,7 +8,7 @@
 
 任务快照包含标题、项目目录名、更新时间和变更时间，并严格拆分以下语义：
 
-- `status` 是用户展示状态：`active`、`waiting`、`paused`、`blocked`、`usage_limited`、`budget_limited`、`idle`、`complete`、`failed`。
+- `status` 是用户展示状态，Windows 与 Android 必须完全一致：`active`、`waiting`、`paused`、`blocked`、`usage_limited`、`budget_limited`、`idle`、`complete`、`failed`。连接状态、数据新鲜度和回合状态不属于任务状态，客户端不得将它们加入任务筛选器。
 - `runtimeStatus` 是官方线程运行态：`notLoaded`、`idle`、`systemError`、`active`。
 - `activeFlags` 只表示 `waitingOnApproval` 或 `waitingOnUserInput`。
 - `latestTurn` 表示最近回合的 `inProgress`、`completed`、`interrupted` 或 `failed`，错误只保留安全代码和脱敏摘要。
@@ -57,3 +57,9 @@ Android 正常链路为 connecting → authenticating → subscribing → connec
 Windows 连接状态为 connecting/syncing/connected/offline，与 Android 状态机不同；connected 不代表待上传 outbox 已清空。TaskSnapshot 中 freshness 描述采集证据的新鲜度，不表示手机当前网络状态。
 
 HTTP body 上限 128 KiB，WebSocket 的 32 KiB 限制作用于客户端入站消息，服务端任务快照没有按该大小分块。慢订阅者缓冲超过 256 KiB 时会跳过广播，目前没有强制断开以立即触发重放的机制。这些边界需纳入后续稳定性验收。
+
+## 2026-09-10 客户端表示合同
+
+任务筛选顺序与标签固定为：active/进行中、waiting/等待处理、paused/已暂停、blocked/已阻塞、usage_limited/用量受限、budget_limited/预算受限、idle/空闲、complete/已完成、failed/失败。九个协议值保持不变，不升级云端协议或数据库 schema。
+
+Windows 新增仅本机 IPC `workstation.status -> { ready: boolean }`，不携带 Token 或正文。ready 来源于本机 app-server 的初始化完成状态；它与云端同步、任务业务状态相互独立。该 IPC 不新增公网 API。

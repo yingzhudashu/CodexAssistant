@@ -46,6 +46,16 @@ class CredentialStore(context: Context) {
         val encrypted = cipher.iv + cipher.doFinal(token.toByteArray(StandardCharsets.UTF_8))
         preferences.edit().putString("token", Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
     }
+    fun saveConnection(value: String, token: String) {
+        require(token.length in 16..4096) { "Token 长度应为 16–4096 字符" }
+        val normalized=value.trim().trimEnd('/')
+        val uri=try { URI(normalized) } catch (_:Exception) { throw IllegalArgumentException("服务地址无效") }
+        val loopback=uri.host in listOf("localhost","127.0.0.1","::1","[::1]")
+        require(!uri.host.isNullOrBlank() && uri.userInfo==null && uri.query==null && uri.fragment==null && uri.path.isNullOrEmpty() && (uri.scheme=="https" || uri.scheme=="http" && loopback)) { "请输入 HTTPS 根地址，禁止路径、查询参数或用户信息；HTTP 仅限回环地址" }
+        val cipher=Cipher.getInstance("AES/GCM/NoPadding").apply{init(Cipher.ENCRYPT_MODE,key())}
+        val encrypted=cipher.iv+cipher.doFinal(token.toByteArray(StandardCharsets.UTF_8))
+        check(preferences.edit().putString("apiUrl",normalized).putString("token",Base64.encodeToString(encrypted,Base64.NO_WRAP)).remove("cursor").commit()) { "安全存储失败，连接未保存" }
+    }
     fun apiUrl(): String = preferences.getString("apiUrl", BuildConfig.CODEX_BASE_URL) ?: BuildConfig.CODEX_BASE_URL
     /** 用户可填站点根地址或旧界面保存的 /codex-assistant 地址，线上请求统一使用站点根。 */
     fun serverBaseUrl(): String = apiUrl().trimEnd('/').removeSuffix("/codex-assistant")

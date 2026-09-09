@@ -28,10 +28,17 @@ data class TaskState(
     val retryAtEpochMs: Long? = null,
     val lastConnectedAtEpochMs: Long? = null,
     val lastTraceId: String? = null,
+    val details: Map<String, DetailMessage> = emptyMap(),
+    val result: ResultMessage? = null,
+    val sending: Map<String,String> = emptyMap(),
+    val results: Map<String,ResultMessage> = emptyMap(),
+    val loadingDetails: Set<String> = emptySet(),
+    val detailErrors: Map<String,String> = emptyMap(),
 )
 
 /** Android 端只负责协议接收和 reducer，不把网络细节泄漏到 Compose。 */
 class TaskRepository(private val credentials: CredentialStore) {
+    @Volatile private var activeSocket: WebSocket? = null
     // 协议消息的 type、protocolVersion 等字段有默认值，但它们仍是线上的必填字段。
     // kotlinx.serialization 默认会省略默认值；必须开启 encodeDefaults，否则服务端会把
     // 首条认证消息看成没有协议版本的非法消息。
@@ -42,6 +49,19 @@ class TaskRepository(private val credentials: CredentialStore) {
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
+
+    fun requestDetail(threadId: String, cursor: String? = null): String {
+        val requestId = java.util.UUID.randomUUID().toString()
+        check(activeSocket?.send(json.encodeToString(ClientDetailMessage(requestId = requestId, threadId = threadId, cursor = cursor))) == true) { "连接不可用" }
+        return requestId
+    }
+
+    fun sendMessage(threadId: String, text: String): String {
+        require(text.trim().length in 1..20000) { "MESSAGE_INVALID" }
+        val requestId = java.util.UUID.randomUUID().toString()
+        check(activeSocket?.send(json.encodeToString(ClientSendMessage(requestId = requestId, threadId = threadId, text = text.trim()))) == true) { "连接不可用" }
+        return requestId
+    }
 
     fun stream(): Flow<TaskState> = callbackFlow {
         var state = TaskState(cursor = credentials.cursor())
@@ -105,6 +125,7 @@ class TaskRepository(private val credentials: CredentialStore) {
             scheduleTraceUpload()
             socket = client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                    activeSocket = webSocket
                     reconnectAttempt = 0
                     traceLogger.event("websocket.open", connectionTraceId)
                     scheduleTraceUpload()
@@ -152,6 +173,15 @@ class TaskRepository(private val credentials: CredentialStore) {
                                 credentials.saveCursor(state.cursor)
                                 trySend(state)
                             }
+                            "detail" -> {
+                                val detail = json.decodeFromString<DetailMessage>(text)
+                                state = state.copy(details = state.details + (detail.threadId to detail), result = null)
+                                trySend(state)
+                            }
+                            "result" -> {
+                                state = state.copy(result = json.decodeFromString<ResultMessage>(text))
+                                trySend(state)
+                            }
                             "error" -> {
                                 val message = json.decodeFromString<ErrorMessage>(text)
                                 permanentFailure = message.code == "auth_required" || message.code == "protocol_unsupported" || message.code == "validation_failed"
@@ -179,6 +209,7 @@ class TaskRepository(private val credentials: CredentialStore) {
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (activeSocket === webSocket) activeSocket = null
                     traceLogger.event("websocket.closed", connectionTraceId)
                     scheduleTraceUpload()
                     if (stopped || permanentFailure) return
@@ -191,6 +222,7 @@ class TaskRepository(private val credentials: CredentialStore) {
         connect()
         awaitClose {
             stopped = true
+            activeSocket = null
             socket?.close(1000, "leaving")
             client.connectionPool.evictAll()
             client.dispatcher.cancelAll()

@@ -1,6 +1,6 @@
 {
   "name": "@codex-assistant/desktop",
-  "version": "2.0.6",
+  "version": "2.0.10",
   "description": "CodexAssistant Windows tray monitor",
   "author": "CodexAssistant",
   "private": true,
@@ -14,7 +14,8 @@
     "package:win": "npm run build && electron-builder --win nsis --publish never"
   },
   "dependencies": {
-    "@codex-assistant/protocol": "2.0.0"
+    "@codex-assistant/protocol": "2.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "electron": "38.1.0",

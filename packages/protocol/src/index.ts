@@ -221,7 +221,29 @@ export const ClientSubscribeMessageSchema = Strict({
 });
 export type ClientSubscribeMessage = Static<typeof ClientSubscribeMessageSchema>;
 
-export const ClientWebSocketMessageSchema = Type.Union([ClientAuthMessageSchema, ClientSubscribeMessageSchema]);
+export const ClientDetailMessageSchema = Strict({
+  type: Type.Literal("detail"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier,
+  cursor: Type.Optional(Type.String({ maxLength: 500 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+});
+export type ClientDetailMessage = Static<typeof ClientDetailMessageSchema>;
+export const ClientSendMessageSchema = Strict({
+  type: Type.Literal("send"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier,
+  threadId: Identifier, text: Type.String({ minLength: 1, maxLength: 20_000 }),
+});
+export type ClientSendMessage = Static<typeof ClientSendMessageSchema>;
+export const DetailMessageSchema = Strict({
+  type: Type.Literal("detail"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier,
+  turns: Type.Array(Type.Unknown(), { maxItems: 50 }), cursor: Type.Optional(Type.String({ maxLength: 500 })),
+});
+export type DetailMessage = Static<typeof DetailMessageSchema>;
+export const ResultMessageSchema = Strict({
+  type: Type.Literal("result"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier,
+  threadId: Identifier, status: Type.Union([Type.Literal("started"), Type.Literal("streaming"), Type.Literal("completed"), Type.Literal("failed")]),
+  text: Type.Optional(Type.String({ maxLength: 20_000 })), error: Type.Optional(Type.String({ maxLength: 500 })),
+});
+export type ResultMessage = Static<typeof ResultMessageSchema>;
+
+export const ClientWebSocketMessageSchema = Type.Union([ClientAuthMessageSchema, ClientSubscribeMessageSchema, ClientDetailMessageSchema, ClientSendMessageSchema]);
 export type ClientWebSocketMessage = Static<typeof ClientWebSocketMessageSchema>;
 
 export const AuthenticatedMessageSchema = Strict({
@@ -257,6 +279,8 @@ export const ServerWebSocketMessageSchema = Type.Union([
   EventMessageSchema,
   SnapshotMessageSchema,
   ErrorMessageSchema,
+  DetailMessageSchema,
+  ResultMessageSchema,
 ]);
 export type ServerWebSocketMessage = Static<typeof ServerWebSocketMessageSchema>;
 
