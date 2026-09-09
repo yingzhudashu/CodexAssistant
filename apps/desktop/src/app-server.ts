@@ -94,7 +94,7 @@ export class CodexAppServer {
         for (const pending of this.#pending.values()) { clearTimeout(pending.timer); pending.reject(new Error("APP_SERVER_EXITED")); }
         this.#pending.clear();
       });
-      await this.request("initialize", { clientInfo: { name: "codex-assistant", version: "2.0.5" } }, INITIALIZE_TIMEOUT_MS);
+      await this.request("initialize", { clientInfo: { name: "codex-assistant", version: "2.0.6" } }, INITIALIZE_TIMEOUT_MS);
       this.notify("initialized", {});
     } catch (error) {
       this.#lastStartFailureAt = Date.now();

@@ -13,7 +13,8 @@ type PendingEvent = IngestEvent & { fingerprint: string };
 type StoredOutbox = { deviceId: string; nextSequence: number; events: PendingEvent[]; fingerprints: Record<string, string> };
 // 只缓存官方基础快照；生命周期投影必须每轮重新计算，不能把推断的 active 写回基础状态。
 type CachedTask = { stamp: string; task: TaskSnapshot; lifecycle?: Lifecycle };
-export const ACTIVE_EVIDENCE_MAX_AGE_MS = 5 * 60_000;
+export const ACTIVE_EVIDENCE_MAX_AGE_MS = 30 * 60_000;
+export const IN_PROGRESS_ITEM_MAX_AGE_MS = 6 * 60 * 60_000;
 
 const MAX_OUTBOX_EVENTS = 5_000;
 const MAX_FINGERPRINTS = 10_000;
@@ -49,6 +50,7 @@ export class Monitor {
   #onStatus: (status: MonitorStatus) => void;
   #lifecycle = new LifecycleReader();
   #threadCache = new Map<string, CachedTask>();
+  #inProgressItems = new Map<string, boolean>();
   #nextFlushAt = 0;
   #flushAttempt = 0;
   #traceBuffer: TraceSpan[] = [];
@@ -110,7 +112,7 @@ export class Monitor {
       const threads = await this.#server.listThreads();
       const seen = new Set(threads.map((thread) => thread.id));
       this.#lifecycle.retain(seen);
-      for (const id of this.#threadCache.keys()) if (!seen.has(id)) this.#threadCache.delete(id);
+      for (const id of this.#threadCache.keys()) if (!seen.has(id)) { this.#threadCache.delete(id); this.#inProgressItems.delete(id); }
       for (const id of Object.keys(this.#outbox.fingerprints)) if (!seen.has(id) && !this.#outbox.events.some((event) => event.task.id === id)) delete this.#outbox.fingerprints[id];
       while (Object.keys(this.#outbox.fingerprints).length > MAX_FINGERPRINTS) delete this.#outbox.fingerprints[Object.keys(this.#outbox.fingerprints)[0]];
       const tasks = await mapLimit(threads, RPC_CONCURRENCY, async (thread) => {
@@ -143,11 +145,12 @@ export class Monitor {
     const cached = this.#threadCache.get(thread.id);
     if (cached?.stamp === stamp) {
       cached.lifecycle = lifecycle;
-      return applyLifecycle(cached.task, lifecycle);
+      return applyLifecycle(cached.task, lifecycle, Date.now(), this.#inProgressItems.get(thread.id) === true);
     }
-    const task = await this.#normalize(thread);
-    this.#threadCache.set(thread.id, { stamp, task, lifecycle });
-    return applyLifecycle(task, lifecycle);
+    const task = await this.#normalize(thread, lifecycle);
+    const entry: CachedTask = { stamp, task, lifecycle };
+    this.#threadCache.set(thread.id, entry);
+    return applyLifecycle(task, lifecycle, Date.now(), this.#inProgressItems.get(thread.id) === true);
   }
 
   #staleTask(thread: AppServerThread): TaskSnapshot {
@@ -156,13 +159,13 @@ export class Monitor {
     const activeFlags = normalizeActiveFlags(thread.status);
     const entry = this.#threadCache.get(thread.id);
     // 文件暂不可读时仍重新检查旧证据的有效期，不能借错误路径永久冻结 active。
-    const cached = entry ? applyLifecycle(entry.task, entry.lifecycle) : undefined;
+    const cached = entry ? applyLifecycle(entry.task, entry.lifecycle, Date.now(), this.#inProgressItems.get(thread.id) === true) : undefined;
     // 读取失败不意味着任务发生了变化：缓存的来源时间必须与缓存内容一起保留。
     if (cached) return { ...cached, freshness: "stale", error: cached.error?.code === "ACTIVE_EVIDENCE_EXPIRED" ? cached.error : { code: "DETAIL_UNAVAILABLE", message: "线程详情暂时不可用，显示最近一次状态" } };
     return { id: thread.id, title: sanitizeText(thread.name || thread.preview || thread.id), ...(projectName(thread.cwd) ? { projectName: projectName(thread.cwd) } : {}), status: deriveTaskStatus(undefined, runtimeStatus, activeFlags, undefined), runtimeStatus, activeFlags, freshness: "unavailable", source: "thread", plan: [], updatedAt, changedAt: updatedAt, error: { code: "DETAIL_UNAVAILABLE", message: "线程详情暂时不可用" } };
   }
 
-  async #normalize(thread: AppServerThread): Promise<TaskSnapshot> {
+  async #normalize(thread: AppServerThread, lifecycle?: Lifecycle): Promise<TaskSnapshot> {
     const [read, goal, turns, items] = await Promise.all([this.#server.readThread(thread.id), this.#server.getGoal(thread.id), this.#server.listTurns(thread.id), this.#server.listItems(thread.id)]);
     const loaded = asRecord(read).thread;
     const currentThread = loaded && typeof loaded === "object" ? { ...(loaded as AppServerThread), ...thread } : thread;
@@ -178,6 +181,7 @@ export class Monitor {
     const plan = this.#plan(turns, items, this.#server.planFor(thread.id));
     const currentStep = plan.find((step) => step.status === "in_progress") ?? plan.find((step) => step.status === "pending");
     const itemList = this.#items(items);
+    this.#inProgressItems.set(currentThread.id, this.#hasInProgressItem(items, lifecycle));
     const latestAction = itemList.find((item) => item.status === "inProgress")?.type ?? itemList[0]?.type;
     const updatedAt = this.#timestamp(currentThread.updatedAt);
     const status = deriveTaskStatus(goalStatus, runtimeStatus, activeFlags, latestTurn);
@@ -214,6 +218,18 @@ export class Monitor {
   #items(value: unknown): AppServerItem[] {
     const rows = asRecord(value).data ?? value;
     return Array.isArray(rows) ? rows.map((row) => { const record = asRecord(row); return (record.item && typeof record.item === "object" ? record.item : record) as AppServerItem; }).slice(0, 100) : [];
+  }
+
+  #hasInProgressItem(value: unknown, lifecycle?: Lifecycle): boolean {
+    if (!lifecycle || lifecycle.turn.status !== "inProgress") return false;
+    const rows = asRecord(value).data ?? value;
+    if (!Array.isArray(rows)) return false;
+    return rows.some((row) => {
+      const entry = asRecord(row);
+      if (typeof entry.turnId === "string" && entry.turnId !== lifecycle.turnId) return false;
+      const item = asRecord(entry.item ?? entry);
+      return item.status === "inProgress";
+    });
   }
 
   async #enqueue(task: TaskSnapshot): Promise<void> {
@@ -291,7 +307,7 @@ function parseStrictEvent(value: unknown): IngestEvent | undefined {
 export function deviceIdFromInstall(seed: string): string { return createHash("sha256").update(seed).digest("hex").slice(0, 32); }
 
 /** 保留独立 RPC 的官方运行态；本机生命周期只修正最近回合，不能伪造 active flags。 */
-export function applyLifecycle(task: TaskSnapshot, lifecycle?: Lifecycle, now = Date.now()): TaskSnapshot {
+export function applyLifecycle(task: TaskSnapshot, lifecycle?: Lifecycle, now = Date.now(), hasInProgressItem = false): TaskSnapshot {
   if (!lifecycle || task.runtimeStatus !== "notLoaded") return task;
   const { error: _error, ...base } = task;
   const latestTurn = lifecycle.turn;
@@ -302,6 +318,11 @@ export function applyLifecycle(task: TaskSnapshot, lifecycle?: Lifecycle, now = 
   // 文件写入时间只是一种有界活动证据，不是进程存活证明。容许文件时钟的亚秒精度差，
   // 超过一秒的未来时间视为异常，不能无限续期。
   // 明确的完成/中止事件不需要续期；Goal 的暂停、阻塞、完成等仍保留原有优先级。
+  const evidenceAge = now - evidenceTime;
+  if (latestTurn.status === "inProgress" && hasInProgressItem && Number.isFinite(evidenceTime) && evidenceTime <= now + 1_000 && evidenceAge < IN_PROGRESS_ITEM_MAX_AGE_MS) {
+    const status = task.goal && task.goal.status !== "active" ? task.goal.status : "active";
+    return { ...base, latestTurn, status, updatedAt, changedAt, freshness: evidenceAge < ACTIVE_EVIDENCE_MAX_AGE_MS ? "fresh" : "stale" };
+  }
   if (latestTurn.status === "inProgress" && (!Number.isFinite(evidenceTime) || evidenceTime > now + 1_000 || now - evidenceTime >= ACTIVE_EVIDENCE_MAX_AGE_MS)) {
     const status = task.goal && task.goal.status !== "active" ? task.goal.status : "idle";
     return { ...base, latestTurn, status, updatedAt, changedAt, freshness: "stale",

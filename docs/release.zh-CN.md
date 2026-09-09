@@ -1,6 +1,6 @@
 # 安装包与发布
 
-当前 Windows 下载版本为 `2.0.5`，Android 为 `2.0.4`；Android `versionCode=7`，协议固定为 `codex-assistant.v2`。各端版本来源分别是 `apps/desktop/package.json` 与 `android/app/build.gradle.kts`。本次运行证据过期修正在 Windows 采集端生效；Android 直接接收修正快照，服务端协议和数据库无需变更。
+当前 Windows 下载版本为 `2.0.6`，Android 为 `2.0.5`；Android `versionCode=8`，协议固定为 `codex-assistant.v2`。各端版本来源分别是 `apps/desktop/package.json` 与 `android/app/build.gradle.kts`。本次运行证据增强在 Windows 采集端生效；Android 直接接收修正快照，服务端协议和数据库无需变更。
 
 ## 构建
 

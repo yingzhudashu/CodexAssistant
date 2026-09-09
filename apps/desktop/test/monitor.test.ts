@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import type { IngestEvent, TaskSnapshot } from "@codex-assistant/protocol";
-import { Monitor, ACTIVE_EVIDENCE_MAX_AGE_MS } from "../src/monitor.js";
+import { Monitor, ACTIVE_EVIDENCE_MAX_AGE_MS, IN_PROGRESS_ITEM_MAX_AGE_MS } from "../src/monitor.js";
 
-const mock = vi.hoisted(() => ({ path: "", reads: 0 }));
+const mock = vi.hoisted(() => ({ path: "", reads: 0, activeItem: true, revision: 0 }));
 vi.mock("../src/app-server.js", () => ({
   CodexAppServer: class {
     async start() {} async stop() {} setTraceContext() {}
@@ -13,8 +13,8 @@ vi.mock("../src/app-server.js", () => ({
     async readThread() { mock.reads++; return {}; }
     async getGoal() { return undefined; }
     async listTurns() { return { data: [{ status: "interrupted" }] }; }
-    async listItems() { return { data: [] }; }
-    latestTurn() { return undefined; } planFor() { return undefined; } planRevision() { return 0; }
+    async listItems() { return { data: mock.activeItem ? [{ turnId: "turn-1", item: { type: "commandExecution", status: "inProgress" } }] : [] }; }
+    latestTurn() { return undefined; } planFor() { return undefined; } planRevision() { return mock.revision; }
   },
 }));
 
@@ -22,6 +22,8 @@ it("reprojects unchanged metadata, expires cached evidence on read failure, and 
   const directory = await mkdtemp(join(tmpdir(), "codex-monitor-"));
   mock.path = join(directory, "rollout.jsonl");
   mock.reads = 0;
+  mock.activeItem = true;
+  mock.revision = 0;
   let now = Date.parse("2026-09-08T06:00:00Z");
   const event = (type: string) => JSON.stringify({ type: "event_msg", timestamp: new Date(now).toISOString(), payload: { type, turn_id: "turn-1" } }) + "\n";
   const uploaded: IngestEvent[] = [];
@@ -44,8 +46,14 @@ it("reprojects unchanged metadata, expires cached evidence on read failure, and 
 
     now += ACTIVE_EVIDENCE_MAX_AGE_MS;
     await waitForPoll();
+    expect(snapshots.at(-1)).toMatchObject({ status: "active", freshness: "stale" });
+
+    now += IN_PROGRESS_ITEM_MAX_AGE_MS - ACTIVE_EVIDENCE_MAX_AGE_MS;
+    await waitForPoll();
     expect(snapshots.at(-1)).toMatchObject({ status: "idle", freshness: "stale", error: { code: "ACTIVE_EVIDENCE_EXPIRED" } });
 
+    mock.activeItem = false;
+    mock.revision++;
     await appendFile(mock.path, JSON.stringify({ type: "event_msg", timestamp: new Date(now).toISOString(), payload: { type: "token_count" } }) + "\n");
     await utimes(mock.path, now / 1000, now / 1000);
     await waitForPoll();
@@ -60,9 +68,9 @@ it("reprojects unchanged metadata, expires cached evidence on read failure, and 
     await appendFile(mock.path, event("task_complete"));
     await waitForPoll();
     expect(snapshots.at(-1)).toMatchObject({ status: "complete", freshness: "fresh" });
-    expect(mock.reads).toBe(1); // 元数据未变化，状态纠正不能依赖重新调用详情 RPC。
-    expect(uploaded.map(row => row.task.status)).toEqual(["active", "idle", "active", "idle", "complete"]);
-    expect(uploaded.map(row => row.localSequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(mock.reads).toBe(2); // 状态投影按证据时间重算；只有计划修订时重新读取详情。
+    expect(uploaded.map(row => row.task.status)).toEqual(["active", "active", "idle", "active", "idle", "complete"]);
+    expect(uploaded.map(row => row.localSequence)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(JSON.stringify(uploaded)).not.toContain("evidenceAt");
   } finally {
     await monitor?.stop();
