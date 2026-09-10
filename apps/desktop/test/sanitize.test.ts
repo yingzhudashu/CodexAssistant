@@ -12,14 +12,14 @@ describe("desktop redaction", () => {
   it("keeps only the project directory name and maps app-server statuses", () => {
     expect(projectName("D:\\work\\CodexAssistant")).toBe("CodexAssistant");
     expect(normalizeStatus({ type: "systemError" })).toBe("failed");
-    expect(normalizeStatus({ type: "active" })).toBe("active");
-    expect(normalizeRuntimeStatus({ type: "active", activeFlags: ["waitingOnUserInput"] })).toBe("active");
-    expect(normalizeActiveFlags({ type: "active", activeFlags: ["waitingOnUserInput", "invalid"] })).toEqual(["waitingOnUserInput"]);
-    expect(deriveTaskStatus(undefined, "active", ["waitingOnApproval"], { status: "inProgress" })).toBe("waiting");
+    expect(normalizeStatus({ type: "running" })).toBe("running");
+    expect(normalizeRuntimeStatus({ type: "active", activeFlags: ["waitingOnUserInput"] }) ).toBe("active");
+    expect(normalizeActiveFlags({ type: "running", activeFlags: ["waitingOnUserInput", "invalid"] })).toEqual(["waitingOnUserInput"]);
+    expect(deriveTaskStatus(undefined, "active", ["waitingOnApproval"], { status: "inProgress" })).toBe("needs_action");
     expect(deriveTaskStatus(undefined, "systemError", [], undefined)).toBe("failed");
-    expect(deriveTaskStatus("complete", "idle", [], undefined)).toBe("complete");
-    expect(deriveTaskStatus(undefined, "idle", [], { status: "completed" })).toBe("complete");
-    expect(deriveTaskStatus(undefined, "idle", [], { status: "interrupted" })).toBe("idle");
+    expect(deriveTaskStatus("completed", "idle", [], undefined)).toBe("completed");
+    expect(deriveTaskStatus(undefined, "idle", [], { status: "completed" })).toBe("completed");
+    expect(deriveTaskStatus(undefined, "idle", [], { status: "interrupted" })).toBe("needs_action");
   expect(normalizeTurn({ status: "failed", startedAt: 1_700_000_000_000, error: { code: "RPC_FAILED", message: "temporary" } })).toMatchObject({ status: "failed", error: { code: "RPC_FAILED" } });
   expect(normalizeTurn({ status: "inProgress", startedAt: "2026-09-08T00:00:00Z" })).toMatchObject({ status: "inProgress" });
   });

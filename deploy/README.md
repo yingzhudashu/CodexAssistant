@@ -16,9 +16,9 @@ systemctl status codex-assistant.service --no-pager
 nginx -t && systemctl reload nginx
 ```
 
-公网反向代理必须保留 `/codex-assistant/` 前缀，并将 `/api/v2/stream` 升级为 WebSocket。`codex-assistant-staging.service` 使用端口 `3241`、状态目录 `/var/lib/codex-assistant-staging`、发布目录 `/opt/codex-assistant-staging/current` 和独立环境文件，发布到 `staging.example.com`；生产和 staging 不得复用状态文件或 Token。
+公网反向代理必须保留 `/codex-assistant/` 前缀，并将 `/api/v3/stream` 升级为 WebSocket。`codex-assistant-staging.service` 使用端口 `3241`、状态目录 `/var/lib/codex-assistant-staging`、发布目录 `/opt/codex-assistant-staging/current` 和独立环境文件，发布到 `staging.example.com`；生产和 staging 不得复用状态文件或 Token。
 
-当前数据库 schema 为版本 5，包含任务事件、任务快照和 `trace_spans`。已有数据库的版本或表集合不匹配时会硬失败，必须先停止服务、人工备份数据库及 WAL 状态，再准备新的空状态目录；同 schema 发布不清空现有数据，不执行 migration。health 接口返回进程 RSS、事件/任务/span 数量和当前游标。故障排查和回滚规则见 [`../docs/operations.zh-CN.md`](../docs/operations.zh-CN.md)。
+当前数据库 schema 为版本 6，包含任务事件、任务快照和 `trace_spans`。已有数据库的版本或表集合不匹配时会硬失败，必须先停止服务、备份数据库及 WAL/SHM 状态，再准备新的空状态目录；生产部署脚本自动执行这些步骤，手工部署需自行执行；同 schema 发布不清空现有数据，不执行 migration。health 接口返回进程 RSS、事件/任务/span 数量和当前游标。故障排查和回滚规则见 [`../docs/operations.zh-CN.md`](../docs/operations.zh-CN.md)。
 
 ## 配置对应关系
 
@@ -30,4 +30,4 @@ nginx -t && systemctl reload nginx
 
 从 Windows 工作区运行 `scripts/deploy-production.ps1 -Server deployment-host` 可发布生产服务；脚本依赖已配置的 SSH 别名、scp、服务器 sudo 权限与现有 `/etc/nginx/sites-available/codex-assistant.conf`。它发布服务 release，不负责构建和上传客户端安装包；客户端步骤见 [发布文档](../docs/release.zh-CN.md)。
 
-staging unit 只是配置模板，现有生产脚本不会替你发布 staging；需独立准备 release、环境文件和反向代理。生产脚本的自动回滚不覆盖全部 systemd/Nginx 配置，部署前按[回滚边界](../docs/release.zh-CN.md#服务端与回滚)备份对应文件。修改 include 文件前也应核对既有 HTTPS server 的位置，不能将本文件作为完整主站 Nginx 配置覆盖安装。
+staging unit 只是配置模板，现有生产脚本不会替你发布 staging；需独立准备 release、环境文件和反向代理。生产脚本备份 systemd、Nginx 配置和不兼容 schema 的旧数据库，恢复范围见[回滚说明](../docs/release.zh-CN.md#服务端与回滚)。修改 include 文件前也应核对既有 HTTPS server 的位置，不能将本文件作为完整主站 Nginx 配置覆盖安装。

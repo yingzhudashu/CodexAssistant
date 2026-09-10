@@ -9,15 +9,10 @@
 1. Android 一级导航仅显示在任务首页与设置首页。任务详情、连接与诊断、外观、通知、关于与更新及连接编辑均不显示底部导航/Navigation Rail。键盘打开时一级导航隐藏。返回顺序为键盘 → 弹层 → 当前页面父页；设置子页 → 设置首页 → 任务首页。连接编辑取消/返回恢复编辑前的页面，未保存变更仍须确认。
 2. Windows 本机发送链路为 renderer → IPC task.send → 本机 Codex app-server，不绕经云端。使用 workstation.status.ready（initialize 回执及 initialized 通知后为 true，进程退出/停止为 false）判断本机就绪。sync.status 的 connecting/syncing/connected/offline 只表示采集同步，不作为本机发送的禁用条件；采集/上传中仍可发送。未就绪显示“本机 Codex 服务尚未就绪。草稿已保留，就绪后请手动发送。”，就绪后不自动提交。
 3. Windows 托盘与窗口图标读取随安装包分发的 tray.ico，包含 16/20/24/32/48/256px 图层。不得使用 SVG data URL；构建校验 ICO 头，运行时检查 nativeImage 非空。关闭窗口保留托盘，双击恢复，右键退出。
-4. Windows 和 Android 使用同一筛选顺序及中文标签：全部、active 进行中、waiting 等待处理、paused 已暂停、blocked 已阻塞、usage_limited 用量受限、budget_limited 预算受限、idle 空闲、complete 已完成、failed 失败。连接、freshness 和回合状态不属于任务状态。
+4. Windows 和 Android 使用同一筛选顺序及中文标签：全部、running 进行中、completed 已完成、failed 失败、needs_action 待确认。连接、freshness 和回合状态不属于任务状态。
 
-### 2026-09-10 修订（信息层次与消息排版）
 
-1. Windows 任务页采用 240px 导航、320px 任务列表、剩余区域任务详情的比例；详情顶部控制区高度不超过 64px，发送区与详情正文保持 1:4 以上可视高度，窄窗口时控制项折行而不挤压正文。
-2. 文案必须使用完整、自然的中文句子：同步状态、任务状态、发送结果和错误原因分开显示；禁止把连接状态当作任务状态，禁止显示无法解释的内部枚举或空白提示。未知字段统一显示“暂未提供”。
-3. 消息正文按结构化内容呈现：段落、标题、无序/有序列表、表格、代码块和行内公式分别使用对应视觉层级；表格在详情内横向滚动，公式使用等宽数学字体并保留原始表达式，不因窄屏导致页面横向溢出。
-4. 字体固定为 Segoe UI/微软雅黑，正文 15px/24px，消息标题 16px/24px，元数据 12px/18px，代码与公式 13px/20px；卡片边框、分区间距和按钮尺寸使用统一 8/12/16/24px 量级。
-
+2026-09-10 开发前验收：Codex 交互请求透传与四状态模型已在主文档定义，开发前须完成人工确认。
 
 [图文阅读版与界面索引](frontend-design/index.html) · [结构化界面规格](frontend-design/spec.json) · [审查与验收记录](frontend-design/review.md)
 
@@ -29,11 +24,7 @@ Windows是原生框架的Electron托盘应用；Android为Compose应用；无独
 
 ## 2. 现状证据与设计差额
 
-原稿的任务状态缺少paused/usage_limited/budget_limited，误把离线当作任务终态；现已按协议完整列举。回合摘要实际每页20，协议limit最大50，禁止写“每页100条完整会话”。旧图的三色窗口按钮、重复Step占位图全部废弃。
-
-现有能力证据：renderer/workspace.js已有任务过滤、task.detail、task.send和更新；monitor.ts已有resume/start/steer；Android TaskRepository已有detail/send。目标视觉是重新排版，不得丢掉消息发送。
-
-设计差额（实现验收的必要条件，不是本次已完成代码）：服务端当前pendingRequests在收到首条result即删除，桌面已修复item完成误释放发送锁；服务端仍需只在目标turn终态后结束路由。这一云端回执差额独立于本次Windows本机发送修复。严格按threadId+requestId归并；同一线程一次只允许一个在途发送。重连期间不得重发。UI目标新增搜索、独立设置、详情规范化和表单错误反馈；它们是本地表现变更，不假设已有服务端搜索/未读/批量删除接口。
+本轮统一四种任务状态、消息直达和动态交互表单。服务端保留 started/streaming 路由至目标回合结束；交互以 requestId+threadId 校验并保证终态幂等。官方用户输入保留所有问题一次提交，MCP 枚举表单支持多选。独立 app-server 无法替其他进程应答请求，此限制明确保留。
 
 ## 3. 视觉、布局与组件规范
 
@@ -58,7 +49,7 @@ Windows是原生框架的Electron托盘应用；Android为Compose应用；无独
 |长内容|列表标题2行省略，详情允许换行；逻辑路径/标识可中部省略，详情可复制全值；代码、表格内部横滚，不使页面横滚；所有图都是首屏示例|
 |动效|按钮反馈即时；展开160ms ease-out、Sheet200ms、Toast4秒；减少动态效果开启时动画0ms；骨架不闪烁、不模拟百分比|
 
-深色主题明确映射：bg=#111820，surface=#1B2632，text=#F1F5F9，muted=#BCC8D5，border=#65768A，selected=#293E54；主色文字在深色下用#A8D0FF，实心按钮背景固定为#2457A6、文字#FFFFFF（与浅色主题的primary token一致）；#A8D0FF仅用于深色主题链接和文字，不作为白字按钮底色。Android固定使用本项目品牌色；本版不提供动态色开关。按钮hover叠加5%黑色，pressed叠加10%黑色（sRGB通道分别乘0.95/0.90并四舍五入），键盘focus使用2px #A8D0FF外圈，disabled使用surface背景和muted文字，并由真实disabled属性阻止提交。危险按钮浅色#B42318/白字，成功#067647，警告#8A4B08。
+深色主题明确映射：bg=#111820，surface=#1B2632，text=#F1F5F9，muted=#BCC8D5，border=#65768A，selected=#293E54；主色文字在深色下用#A8D0FF，Android深色按钮背景#9AC3FF、文字#102A4C；Windows背景#2457A6、文字#FFFFFF；#A8D0FF仅用于深色主题链接和文字，不作为白字按钮底色。Android固定使用本项目品牌色；本版不提供动态色开关。按钮hover叠加5%黑色，pressed叠加10%黑色（sRGB通道分别乘0.95/0.90并四舍五入），键盘focus使用2px #A8D0FF外圈，disabled使用surface背景和muted文字，并由真实disabled属性阻止提交。危险按钮浅色#B42318/白字，成功#067647，警告#8A4B08。
 
 Android导航仅在一级页存在：600dp及以上的rail也适用；进入任务详情保留平板业务列表/详情双栏，但移除一级rail。二级页面宽度不再预留导航空间。
 
@@ -82,7 +73,7 @@ Android导航仅在一级页存在：600dp及以上的rail也适用；进入任�
 
 G01：进入页面先读缓存（若存在且属于当前账号），标记“上次同步”；同时发起只读刷新。首次无缓存显示骨架；成功空数组才显示“暂无…”。失败不删除已有数据。未知数值显示“未提供”，绝不能显示0冒充测量值。
 
-G02：点击任一写操作立即禁用该动作和冲突操作，按钮文字“处理中…”，输入保持；远端业务写入只在服务端明确成功后显示成功并清空对应草稿；纯本地动作与系统桥接按G13的本地完成条件判断。失去连接或超时显示“结果尚未确认”，先查询资源状态再允许重发；非幂等操作不得静默自动重试。只读请求可手动重试。
+G02：普通消息立即提交且允许连续发送；交互表单提交时禁用该请求的重复操作，按钮文字“处理中…”，输入保持；远端业务写入只在服务端明确成功后显示成功并清空对应草稿；纯本地动作与系统桥接按G13的本地完成条件判断。失去连接或超时显示“结果尚未确认”，先查询资源状态再允许重发；非幂等操作不得静默自动重试。只读请求可手动重试。
 
 G03：关闭表单/切换账户前如有未保存修改，弹“放弃未保存内容？”；默认焦点“继续编辑”，另有“放弃并离开”。普通页返回不弹确认。关闭模态层先返回其父层，焦点恢复到触发控件；正在提交时可离开但不假称操作被取消，后台结果按资源ID归并。跨账号迟到响应一律丢弃。
 
@@ -152,6 +143,8 @@ G16：控件可见性按角色、平台、当前状态和动作前置条件共�
 
 Android底部“任务”进入CA-03；“设置”进入设置首页，页内提供连接与诊断CA-12（再进入连接编辑CA-02）、外观CA-09、通知CA-10、关于与更新CA-11四个固定入口。这些子页不展示一级导航，返回设置首页。桌面没有通知导航。
 
+Android 设置页：居中最大720dp、外边距24dp；顶部连接卡片，设备偏好分组，辅助说明和≥48dp点击目标。二级页显示返回，主题立即保存，系统状态栏与导航栏同步主题并保证图标对比度；使用 AndroidX edge-to-edge 和安全区避免内容被系统栏遮挡。连接编辑保留丢弃确认。交互秘密只存内存，不进入 saved state、日志和结果回显。
+
 
 ![系统确认与恢复示意](design-assets/final/system-confirm-windows.svg)
 
@@ -163,17 +156,18 @@ Android底部“任务”进入CA-03；“设置”进入设置首页，页内�
 
 |域|值与展示|
 |---|---|
-|TaskSnapshot.status|active进行中；paused已暂停；blocked已阻塞；usage_limited用量受限；budget_limited预算受限；waiting等待处理；idle空闲；complete已完成；failed失败|
-|activeFlags|waitingOnApproval显示“请在工作站处理审批”；waitingOnUserInput显示“等待补充信息”并可发送文本；本客户端没有远程批准接口|
+|TaskSnapshot.status|running进行中；completed已完成；failed失败；needs_action待确认|
+|activeFlags|waitingOnApproval显示“请处理待确认请求”；waitingOnUserInput显示“等待补充信息”并可发送文本；交互请求通过统一表单处理|
 |latestTurn.status|inProgress进行中；completed回合完成；interrupted回合中断；failed回合失败；中断不等同TaskSnapshot新增一个cancelled值|
 |freshness|fresh近期采集、stale缓存、unavailable无法采集；完全按字段显示，不根据updatedAt超过10秒推断过期|
 |连接|Windows connecting/syncing/connected/offline；Android connecting/authenticating/subscribing/connected/reconnecting/offline/auth_failed/protocol_error/not_configured；两端不合并状态机|
 |计划|pending待开始、in_progress执行中、completed完成、failed失败；进度=completed数量/plan长度；无计划不显示0/0、百分比或伪步骤|
 |按需详情|用户打开详情触发一次detail，limit=20；cursor只从上一页返回值读取；有cursor才显示“加载更早回合”，每次点击加载一页；关闭后丢弃回合正文缓存，不在云端保存整个历史|
-|消息|send.text去首尾空白后1–20000字符；requestId为新UUID；started只表示已接受，streaming追加文本，completed才表示该turn完成；failed显示明确错误；重复点击忽略|
+|消息|send.text去首尾空白后1–20000字符；requestId为新UUID；started只表示已接受，streaming追加文本，completed才表示该turn完成；failed显示明确错误；每次明确发送产生新requestId，旧回执不清除新草稿|
 |非结构化回合|turns为unknown[]，只提取id/status/startedAt/completedAt和type为用户消息/助手消息的可读text；其他对象显示“此内容请在工作站查看”，不得直接JSON.stringify展示|
 |身份|服务使用共享Token而不是多用户隔离；界面不伪造不同用户或设备角色；Android详情/发送由云端转发至已连接桌面控制器，不可达时说明“工作站未连接”；Windows通过本机IPC并按本机ready提示，任务快照仍可查看|
-|Windows本机控制|workstation.status.ready 独立于 sync.status；ready=true且正文有效、同线程无在途请求才启用发送；Android仍须已完成云端订阅，工作站不可达由服务端回执提示|
+|Windows本机控制|workstation.status.ready 独立于 sync.status；ready=true且正文有效、正文有效即可发送；Android仍须已完成云端订阅，工作站不可达由服务端回执提示|
+|动态交互|interaction.request 包含 questions 的 id/header/question/required/multiple/isOther/isSecret/options；一次提交全部 answers。确认使用 offered decision ID；取消为 cancel=true；unsupported 不伪造答案。终态由工作站回执或官方解决事件确定。详见 protocol.zh-CN.md。|
 
 
 ## 5. 页面注册表
@@ -181,14 +175,14 @@ Android底部“任务”进入CA-03；“设置”进入设置首页，页内�
 |ID|界面|设备|来源|
 |---|---|---|---|
 |[CA-01](#ca-01)|首次连接|Windows, Android|`apps/desktop/src/desktop-config.ts`|
-|[CA-02](#ca-02)|连接编辑与恢复|Windows, Android|`apps/desktop/src/renderer/app.js`|
+|[CA-02](#ca-02)|连接编辑与恢复|Windows, Android|`apps/desktop/src/renderer/workspace.js`|
 |[CA-03](#ca-03)|任务首页与筛选|Windows, Android|`apps/desktop/src/renderer/workspace.js`|
-|[CA-04](#ca-04)|任务详情与执行计划|Windows, Android|`apps/desktop/src/renderer/app.js`|
+|[CA-04](#ca-04)|任务详情与执行计划|Windows, Android|`apps/desktop/src/renderer/workspace.js`|
 |[CA-05](#ca-05)|回合摘要与分页|Windows, Android|`apps/desktop/src/monitor.ts`|
 |[CA-06](#ca-06)|向工作站发送消息|Windows, Android|`apps/desktop/src/renderer/workspace.js`|
 |[CA-07](#ca-07)|回复流与未确认送达|Windows, Android|`apps/server/src/app.ts`|
 |[CA-08](#ca-08)|Windows托盘与窗口|Windows|`apps/desktop/src/main.ts`|
-|[CA-09](#ca-09)|设置与外观|Windows, Android|`apps/desktop/src/renderer/workspace.js`|
+|[CA-09](#ca-09)|设置与外观|Windows, Android|`android/app/src/main/java/site/codexassistant/SettingsPage.kt`|
 |[CA-10](#ca-10)|Android通知与权限|Android|`android/app/src/main/java/site/codexassistant/CodexScreen.kt`|
 |[CA-11](#ca-11)|版本检查与下载|Windows, Android|`apps/desktop/src/main.ts`|
 |[CA-12](#ca-12)|连接诊断与只读状态|Windows, Android|`apps/desktop/src/renderer/workspace.js`|
@@ -269,7 +263,7 @@ Android底部“任务”进入CA-03；“设置”进入设置首页，页内�
 
 **布局**：未认证壳：无业务侧栏、无底部导航；桌面居中480宽表单，手机左右16；应用名称、表单标题、字段、操作顺序展示。本项目不提供注册或令牌发行功能。
 
-**数据绑定**：`apps/desktop/src/renderer/app.js`。getConnection只返回配置标识/地址；替换Token必须重新输入。
+**数据绑定**：`apps/desktop/src/renderer/workspace.js`。getConnection只返回配置标识/地址；替换Token必须重新输入。
 
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
@@ -338,7 +332,7 @@ Android底部“任务”进入CA-03；“设置”进入设置首页，页内�
 |---|---|---|---|
 |连接状态|record|已连接 · 最近同步 12秒前|连接状态独立于任务状态；显示快照同步时间|
 |搜索|input|同步协调器|标题/projectName本地不区分大小写包含搜索；空值显示全部|
-|状态筛选|select|全部|全部+九种协议任务状态，不添加离线/已取消到任务枚举|
+|状态筛选|select|全部|全部+四种协议任务状态，不添加离线/已取消到任务枚举|
 |任务|record|同步协调器 · 进行中 · 2/5步骤|标题2行；状态文字；有效plan才显示进度|
 |最近变化|record|部署检查 · 已完成 · 3分钟前|changedAt降序，等值按id字典序稳定排序|
 
@@ -398,7 +392,7 @@ Android底部“任务”进入CA-03；“设置”进入设置首页，页内�
 
 **布局**：使用§3设备壳。字段按表从上到下；主体单独滚动，操作区固定在主体底部；主次操作为交互表前两项，其余为右上“更多操作”。
 
-**数据绑定**：`apps/desktop/src/renderer/app.js`。TaskSnapshot + task.detail/threadId。
+**数据绑定**：`apps/desktop/src/renderer/workspace.js`。TaskSnapshot + task.detail/threadId。
 
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
@@ -564,7 +558,7 @@ Android底部“任务”进入CA-03；“设置”进入设置首页，页内�
 
 |条目|精确定义|
 |---|---|
-|触发与前置|Windows：workstation.status.ready=true；Android：已完成云端订阅。正文去首尾空白后1–20000字符、同线程无在途发送；云端同步中不禁用Windows本机发送。|
+|触发与前置|Windows：workstation.status.ready=true；Android：已完成云端订阅。正文去首尾空白后1–20000字符、运行中仍可继续发送；云端同步中不禁用Windows本机发送。|
 |执行类别|write（按G13解释）|
 |事件/调用|`task.send / send(threadId,text,requestId)`|
 |处理中|“发送”禁用并显示“处理中…”；本页对象保留，禁止并发重复提交。|
@@ -746,7 +740,7 @@ Android底部“任务”进入CA-03；“设置”进入设置首页，页内�
 
 **布局**：使用§3设备壳。字段按表从上到下；主体单独滚动，操作区固定在主体底部；主次操作为交互表前两项，其余为右上“更多操作”。
 
-**数据绑定**：`apps/desktop/src/renderer/workspace.js`。UI本地配置 + 应用既有更新入口。
+**数据绑定**：`android/app/src/main/java/site/codexassistant/SettingsPage.kt`。UI本地配置 + 应用既有更新入口。
 
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
@@ -1073,13 +1067,13 @@ Windows：使用系统原生标题栏及右侧最小化/最大化/关闭按钮�
 
 Android：最低API26；前台同步服务仅一条常驻低重要性通知；任务通知独立渠道。锁屏显示脱敏标题+状态，隐藏正文。未授权POST_NOTIFICATIONS时说明权限状态，但不谎称订阅失败。平板≥840使用列表/详情双栏；旋转保留taskId和草稿。
 
-更新：两端打开系统浏览器下载发布清单指定URL，不能显示“已安装”或模拟下载进度。Windows版本当前代码仅字符串比较；目标必须语义版本比较并拒绝降级；Android按versionCode。未知签名/缺失哈希如实标“未提供”，不自动伪造校验成功。
+更新：两端打开系统浏览器下载发布清单指定URL，不能显示“已安装”或模拟下载进度。Windows使用 semver 比较并拒绝降级，无效版本直接报错；Android按versionCode。未知签名/缺失哈希如实标“未提供”，不自动伪造校验成功。
 
 ## 7. 发布验收门槛
 
 
 1. 页面注册表全部可通过规定入口到达，返回后定位不丢失；没有孤立按钮、无意义“继续”按钮、正文写JSON或未说明的占位框。
-2. 每个事件ID核对前置/处理中/成功/失败/返回，写请求双击只产生一次有效动作。断网/超时不能显示成功或重放未知写请求。
+2. 每个事件ID核对前置/处理中/成功/失败/返回，交互重复提交只产生一次有效动作；普通消息允许连续发送。断网/超时不能显示成功或重放未知写请求。
 3. 像素验收以SVG中的结构和几何表为基准：布局尺寸偏差≤2px/dp，字体使用指定系统栈；系统标题栏、字体栅格化、平台文件选择器由OS决定，不要求跨OS像素一致。
 4. 覆盖Web 1440×900/1024×768/390×844/320×640；Android 390×844、600×960、840×900、1024×768，字体100%/200%，深浅色、键盘打开、长文本；Windows应用另测125%/150%缩放、任务栏四周停靠/自动隐藏、标题栏关闭与托盘退出。
 5. 对比度：普通文字≥4.5:1，大标题和控件边界≥3:1；Tab/读屏/减少动态效果通过；账号隔离、403深链、离线只读、换账号迟到写入逐条验证。
@@ -1091,11 +1085,3 @@ Android：最低API26；前台同步服务仅一条常驻低重要性通知；�
 所有相对源码路径相对于当前项目根目录。渲染命令：`python docs/frontend-design/render.py`。静态复核命令：`python docs/frontend-design/validate.py`（Python 3、playwright、Pillow，以及本机Microsoft Edge）。渲染只写当前项目的设计文档和 final 图稿；不会写产品源码或请求外部接口。源码 SHA-256 与 HEAD 记录在 source-baseline.json，包含本次审查时的工作区内容，不等同于只读已提交版本。
 
 设计方法参考：[imagegen-frontend-mobile](https://github.com/diuzhev26-glitch/imagegen-frontend-mobile)。采用其平台原生、可读性、连续屏幕一致性要求；本交付为精确 SVG 线框/结构图，未调用外部绘图服务。
-
-## 2026-09-10 IME 最终验收
-
-桌面与 Android 会话页由单一会话容器消费 IME Insets，输入框与键盘顶部间距目标 8dp。附件、消息输入和发送控件在窄屏按统一行列对齐，禁止重复底部留白。
-
-## 2026-09-10 Android 重构与统一状态
-
-任务详情改为“页面标题—任务概览—分区标签—分区内容—操作反馈”五层结构，计划、回合摘要和发送消息分别使用独立卡片滚动容器；二级页隐藏一级导航，返回按键依次回到父页。任务状态对用户只显示四类：进行中（active/idle）、需要处理（waiting/paused/blocked/usage_limited/budget_limited）、已完成（complete/completed）、失败（failed）；连接状态和回合状态不进入任务筛选。

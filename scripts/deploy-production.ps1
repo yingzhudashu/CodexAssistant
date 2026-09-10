@@ -26,7 +26,9 @@ try {
         $sha256 = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
         $remoteTmp = "/tmp/codex-assistant-$release"
         scp -- $archive "${Server}:$remoteTmp.tar.gz"
+        if ($LASTEXITCODE) { throw 'Unable to upload the server archive.' }
         scp -- (Join-Path $root 'deploy/codex-assistant.service') "${Server}:$remoteTmp.service"
+        if ($LASTEXITCODE) { throw 'Unable to upload the service unit.' }
         scp -- (Join-Path $root 'deploy/nginx-codex-assistant.locations.conf') "${Server}:$remoteTmp.nginx"
         if ($LASTEXITCODE) { throw 'Unable to upload CodexAssistant release files.' }
         $remote = @'
@@ -43,27 +45,44 @@ current="$app/current"
 state=/var/lib/codex-assistant
 environment=/etc/codex-assistant/codex-assistant.env
 nginx_config=/etc/nginx/sites-available/codex-assistant.conf
-nginx_backup="$nginx_config.codex-assistant-$release.bak"
-previous=''
-nginx_changed=0
-created_target=0
+backup="/var/backups/codex-assistant/$release"
+previous="$(sudo readlink "$current" || true)"
+configs_changed=0
+service_touched=0
+state_changed=0
+sudo install -d -m 0700 "$backup"
+for config in /etc/systemd/system/codex-assistant.service /etc/nginx/snippets/codex-assistant.locations.conf "$nginx_config"; do
+  if sudo test -f "$config"; then sudo cp -a "$config" "$backup/$(basename "$config")"; fi
+done
 rollback() {
   status=$?
   trap - EXIT
   if [ "$status" -ne 0 ]; then
-    if [ -n "$previous" ]; then
-      sudo ln -sfn "$previous" "$current.rollback"
-      sudo mv -Tf "$current.rollback" "$current"
-      sudo systemctl restart codex-assistant.service || true
-    elif [ -L "$current" ]; then
-      sudo rm -f "$current"
-      sudo systemctl stop codex-assistant.service || true
+    if [ "$service_touched" -eq 1 ]; then sudo systemctl stop codex-assistant.service || true; fi
+    if [ "$state_changed" -eq 1 ]; then
+      sudo install -d -m 0700 "$backup/failed-new-state"
+      for name in codex-assistant.sqlite codex-assistant.sqlite-wal codex-assistant.sqlite-shm; do
+        if sudo test -f "$state/$name"; then sudo mv "$state/$name" "$backup/failed-new-state/$name"; fi
+        if sudo test -f "$backup/$name"; then sudo mv "$backup/$name" "$state/$name"; fi
+      done
     fi
-    if [ "$created_target" -eq 1 ] && [ -d "$target" ]; then sudo rm -rf -- "$target"; fi
-    if [ "$nginx_changed" -eq 1 ] && [ -f "$nginx_backup" ]; then
-      sudo mv -f "$nginx_backup" "$nginx_config"
+    if [ "$configs_changed" -eq 1 ]; then
+      for config in /etc/systemd/system/codex-assistant.service /etc/nginx/snippets/codex-assistant.locations.conf "$nginx_config"; do
+        if sudo test -f "$backup/$(basename "$config")"; then sudo cp -a "$backup/$(basename "$config")" "$config"; else sudo rm -f "$config"; fi
+      done
+      sudo systemctl daemon-reload
       sudo nginx -t && sudo systemctl reload nginx || true
     fi
+    if [ "$service_touched" -eq 1 ]; then
+      if [ -n "$previous" ]; then
+        sudo ln -sfn "$previous" "$current.rollback"
+        sudo mv -Tf "$current.rollback" "$current"
+        sudo systemctl restart codex-assistant.service || true
+      else
+        sudo rm -f "$current"
+      fi
+    fi
+    echo "Deployment failed; preserved release and recovery data at $backup" >&2
   fi
   sudo rm -f "$archive" "$unit" "$snippet" || true
   exit "$status"
@@ -73,11 +92,10 @@ sudo id codexassistant >/dev/null 2>&1 || sudo useradd --system --home-dir "$sta
 sudo install -d -o codexassistant -g codexassistant -m 0750 "$app/releases" "$state"
 sudo install -d -o root -g root -m 0755 /srv/www/codex-assistant/downloads
 sudo install -d -o root -g root -m 0750 /etc/codex-assistant
-test ! -e "$target"
+sudo test ! -e "$target"
 echo "$sha  $archive" | sha256sum -c -
 sudo install -d -o codexassistant -g codexassistant -m 0750 "$target"
 sudo tar -xzf "$archive" -C "$target"
-created_target=1
 sudo chown -R codexassistant:codexassistant "$target"
 sudo -u codexassistant -- env PATH=/opt/node-v22.23.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin NPM_CONFIG_CACHE="$state/npm-cache" /opt/node-v22.23.2-linux-x64/bin/npm ci --omit=dev --ignore-scripts --no-audit --no-fund --workspace=@codex-assistant/server --prefix "$target"
 if ! sudo test -f "$environment"; then
@@ -85,10 +103,10 @@ if ! sudo test -f "$environment"; then
   sudo sh -c "printf '%s\n' 'CODEX_ASSISTANT_ACCESS_TOKEN=$token' > '$environment'"
   sudo chmod 0600 "$environment"
 fi
+configs_changed=1
 sudo install -o root -g root -m 0644 "$unit" /etc/systemd/system/codex-assistant.service
 sudo install -o root -g root -m 0644 "$snippet" /etc/nginx/snippets/codex-assistant.locations.conf
 if ! grep -Fqx '    include /etc/nginx/snippets/codex-assistant.locations.conf;' "$nginx_config"; then
-  sudo cp -a "$nginx_config" "$nginx_backup"
   sudo python3 - "$nginx_config" <<'PY'
 from pathlib import Path
 import sys
@@ -100,10 +118,29 @@ if source.count(needle) != 1:
     raise SystemExit("Unable to identify the production OtherService server block")
 path.write_text(source.replace(needle, include + needle, 1), encoding="utf-8")
 PY
-  nginx_changed=1
 fi
 sudo nginx -t
-if [ -L "$current" ]; then previous="$(readlink "$current")"; fi
+# Incompatible schema starts from empty state. Keep the old DB/WAL for rollback;
+# never migrate data or reopen the new database with the previous release.
+expected_schema="$(sudo sed -n 's/^const SCHEMA_VERSION = \([0-9]*\);/\1/p' "$target/apps/server/dist/database.js")"
+test -n "$expected_schema"
+if sudo test -f "$state/codex-assistant.sqlite"; then
+  existing_schema="$(sudo python3 - "$state/codex-assistant.sqlite" <<'PY'
+import sqlite3, sys
+with sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True) as connection:
+    print(connection.execute('PRAGMA user_version').fetchone()[0])
+PY
+)"
+  if [ "$existing_schema" != "$expected_schema" ]; then
+    service_touched=1
+    sudo systemctl stop codex-assistant.service
+    state_changed=1
+    for name in codex-assistant.sqlite codex-assistant.sqlite-wal codex-assistant.sqlite-shm; do
+      if sudo test -f "$state/$name"; then sudo mv "$state/$name" "$backup/$name"; fi
+    done
+  fi
+fi
+service_touched=1
 sudo ln -sfn "$target" "$current.next"
 sudo mv -Tf "$current.next" "$current"
 sudo systemctl daemon-reload
@@ -113,13 +150,14 @@ for _ in $(seq 1 30); do
   curl -fsS http://127.0.0.1:3240/codex-assistant/health >/dev/null && break
   sleep 1
 done
-curl -fsS http://127.0.0.1:3240/codex-assistant/health >/dev/null
+curl -fsS http://127.0.0.1:3240/codex-assistant/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["protocolVersion"] == "codex-assistant.v3"'
 sudo systemctl reload nginx
-curl -fsS https://server.example.com/codex-assistant/health >/dev/null
+curl -fsS https://server.example.com/codex-assistant/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["protocolVersion"] == "codex-assistant.v3"'
 mapfile -t releases < <(sudo find "$app/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | awk '{print $2}')
 for old in "${releases[@]:5}"; do sudo rm -rf -- "$old"; done
-sudo rm -f "$nginx_backup" "$archive" "$unit" "$snippet"
+sudo rm -f "$archive" "$unit" "$snippet"
 echo "CodexAssistant production release active: $release"
+echo "RecoveryBackup=$backup"
 '@
         $remote = $remote.Replace('__RELEASE__', $release).Replace('__SHA256__', $sha256).Replace('__TMP__', $remoteTmp)
         $remote | ssh -o BatchMode=yes $Server "tr -d '\r' | bash -s"

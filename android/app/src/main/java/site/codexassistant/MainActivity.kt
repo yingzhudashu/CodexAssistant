@@ -16,9 +16,13 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
         val credentials = CredentialStore(this)
-        // 使用 startForegroundService 兼容 Android O+ 的后台启动限制；服务会在 onCreate
-        // 的第一时间调用 startForeground，避免系统将其视为后台普通服务而停止。
-        if (credentials.token() != null) ContextCompat.startForegroundService(this, Intent(this, SyncForegroundService::class.java))
         setContent { CodexTheme { CodexScreen(credentials) } }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (CredentialStore(this).token() != null) {
+            ContextCompat.startForegroundService(this, Intent(this, SyncForegroundService::class.java))
+        }
     }
 }

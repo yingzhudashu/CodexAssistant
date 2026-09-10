@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { PROTOCOL_VERSION, TaskStatusSchema, InteractionRequestSchema, InteractionQuestionSchema, InteractionSubmitMessageSchema, InteractionResultSchema } from '@codex-assistant/protocol';
+const spec = JSON.parse(readFileSync(new URL('../docs/frontend-design/spec.json', import.meta.url), 'utf8')).protocolContract;
+const same = (actual, expected, name) => assert.deepEqual([...actual].sort(), [...expected].sort(), name);
+assert.equal(spec.version, PROTOCOL_VERSION);
+same(spec.taskStatuses, TaskStatusSchema.anyOf.map(s => s.const), 'task status mismatch');
+same(spec.requestFields, Object.keys(InteractionRequestSchema.properties), 'request field mismatch');
+same(spec.questionFields, Object.keys(InteractionQuestionSchema.properties), 'question field mismatch');
+same(spec.submitFields, Object.keys(InteractionSubmitMessageSchema.properties), 'submission field mismatch');
+same(spec.resultStatuses, InteractionResultSchema.properties.status.anyOf.map(s => s.const), 'result enum mismatch');
+console.log('Design contract: protocol version, statuses, request, questions, submit, results match');

@@ -19,7 +19,7 @@ class SyncCoordinator(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableState = MutableStateFlow(TaskState())
     private var job: Job? = null
-    private var repository: TaskRepository? = null
+    @Volatile private var repository: TaskRepository? = null
 
     fun state(): StateFlow<TaskState> = mutableState.asStateFlow()
 
@@ -28,15 +28,19 @@ class SyncCoordinator(context: Context) {
         if (job?.isActive == true) return
         val credentials = CredentialStore(appContext)
         mutableState.value = mutableState.value.copy(cursor = credentials.cursor())
+        val nextRepository = TaskRepository(credentials)
+        repository = nextRepository
         job = scope.launch {
-      TaskRepository(credentials).also { repository = it }.stream().collect { mutableState.value = it }
+            nextRepository.stream().collect { if (repository === nextRepository) mutableState.value = it }
         }
     }
 
     @Synchronized
     fun stop() {
+        repository = null
         job?.cancel()
         job = null
+        mutableState.value = mutableState.value.copy(connected = false, connectionStatus = "offline", error = "同步服务已停止，打开应用后恢复")
     }
 
     /** 保存新凭据后丢弃旧连接状态，并立刻按新地址和 Token 重建唯一 WebSocket。 */
@@ -49,4 +53,5 @@ class SyncCoordinator(context: Context) {
 
     fun requestDetail(threadId: String, cursor: String? = null): String = repository?.requestDetail(threadId, cursor) ?: error("连接不可用")
     fun sendMessage(threadId: String, text: String): String = repository?.sendMessage(threadId, text) ?: error("连接不可用")
+    fun submitInteraction(requestId: String, threadId: String, value: kotlinx.serialization.json.JsonElement): Boolean = repository?.submitInteraction(requestId, threadId, value) == true
 }

@@ -5,9 +5,10 @@ import { createInterface, type Interface } from "node:readline";
 import { join } from "node:path";
 import type { TraceContext, TraceSpan } from "@codex-assistant/protocol";
 
-type RpcResponse = { id?: number; result?: unknown; error?: { message?: string } };
+type RpcResponse = { id?: number | string; result?: unknown; error?: { message?: string } };
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 export type AppServerNotification = { method: string; params: Record<string, unknown> };
+export type AppServerRequest = { id: number | string; method: string; params: Record<string, unknown> };
 
 export type AppServerThread = {
   id: string; path?: string | null; name?: string; preview?: string; cwd?: string; status?: string | { type?: string; activeFlags?: string[] }; updatedAt?: string | number;
@@ -64,11 +65,15 @@ export class CodexAppServer {
   #onLog?: (message: string) => void;
   #lastStartFailureAt = 0;
   #onNotification?: (notification: AppServerNotification) => void;
+  #onRequest?: (request: AppServerRequest) => void;
+  #onExit?: () => void;
 
-  constructor(options: { onSpan?: (span: TraceSpan) => void; onLog?: (message: string) => void; onNotification?: (notification: AppServerNotification) => void } = {}) {
+  constructor(options: { onSpan?: (span: TraceSpan) => void; onLog?: (message: string) => void; onNotification?: (notification: AppServerNotification) => void; onRequest?: (request: AppServerRequest) => void; onExit?: () => void } = {}) {
     this.#onSpan = options.onSpan;
     this.#onLog = options.onLog;
     this.#onNotification = options.onNotification;
+    this.#onRequest = options.onRequest;
+    this.#onExit = options.onExit;
   }
 
   setTraceContext(context: TraceContext | undefined): void { this.#activeTrace = context; }
@@ -103,6 +108,7 @@ export class CodexAppServer {
       });
       this.#child.once("exit", (code, signal) => {
         this.#ready = false;
+        this.#onExit?.();
         this.#onLog?.(`app-server exited code=${code ?? "null"} signal=${signal ?? "null"}`);
         this.#lastStartFailureAt = Date.now();
         this.#child = undefined;
@@ -110,7 +116,7 @@ export class CodexAppServer {
         for (const pending of this.#pending.values()) { clearTimeout(pending.timer); pending.reject(new Error("APP_SERVER_EXITED")); }
         this.#pending.clear();
       });
-      await this.request("initialize", { clientInfo: { name: "codex-assistant", version: "2.0.6" } }, INITIALIZE_TIMEOUT_MS);
+      await this.request("initialize", { clientInfo: { name: "codex-assistant", version: "2.0.12" }, capabilities: { experimentalApi: true } }, INITIALIZE_TIMEOUT_MS);
       this.notify("initialized", {});
       this.#ready = true;
     } catch (error) {
@@ -123,8 +129,15 @@ export class CodexAppServer {
   async stop(): Promise<void> {
     this.#ready = false;
     this.#lines?.close();
-    this.#child?.kill();
-    this.#child = undefined;
+    const child = this.#child;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 5_000);
+        child.once("exit", () => { clearTimeout(timer); resolve(); });
+        child.kill();
+      });
+    }
+    if (this.#child === child) this.#child = undefined;
     for (const pending of this.#pending.values()) { clearTimeout(pending.timer); pending.reject(new Error("APP_SERVER_STOPPED")); }
     this.#pending.clear();
   }
@@ -132,6 +145,16 @@ export class CodexAppServer {
   notify(method: string, params: unknown): void {
     if (!this.#child?.stdin.writable) throw new Error("APP_SERVER_NOT_RUNNING");
     this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+  }
+
+  respond(idValue: number | string, result: unknown): void {
+    if (!this.#child?.stdin.writable) throw new Error("APP_SERVER_NOT_RUNNING");
+    this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: idValue, result })}\n`);
+  }
+
+  respondError(idValue: number | string, code: number, message: string): void {
+    if (!this.#child?.stdin.writable) throw new Error("APP_SERVER_NOT_RUNNING");
+    this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: idValue, error: { code, message } })}\n`);
   }
 
   async request(method: string, params: unknown, timeoutMs = RPC_TIMEOUT_MS): Promise<unknown> {
@@ -173,9 +196,16 @@ export class CodexAppServer {
   async listTurns(idValue: string, cursor?: string): Promise<unknown> { return this.request("thread/turns/list", { threadId: idValue, limit: 20, itemsView: "summary", sortDirection: "desc", cursor: cursor ?? null }); }
   latestTurn(idValue: string): unknown | undefined { return this.#latestTurns.get(idValue); }
   async listItems(idValue: string, cursor?: string): Promise<unknown> { return this.request("thread/items/list", { threadId: idValue, limit: 100, sortDirection: "desc", cursor: cursor ?? null }); }
-  async resumeThread(idValue: string): Promise<unknown> { return this.request("thread/resume", { threadId: idValue, excludeTurns: true }); }
+  async resumeThread(idValue: string): Promise<unknown> {
+    const value = await this.request("thread/resume", { threadId: idValue }) as { thread?: { turns?: unknown[] } };
+    const turn = value.thread?.turns?.at(-1);
+    if (turn) this.#latestTurns.set(idValue, turn);
+    return value;
+  }
   async startTurn(idValue: string, text: string): Promise<unknown> {
-    return this.request("turn/start", { threadId: idValue, input: [{ type: "text", text }] });
+    const value = await this.request("turn/start", { threadId: idValue, input: [{ type: "text", text }] }) as { turn?: unknown };
+    if (value.turn) this.#latestTurns.set(idValue, value.turn);
+    return value;
   }
   async steerTurn(idValue: string, turnId: string, text: string): Promise<unknown> {
     return this.request("turn/steer", { threadId: idValue, expectedTurnId: turnId, input: [{ type: "text", text }] });
@@ -196,7 +226,13 @@ export class CodexAppServer {
     if (line.length > MAX_JSON_LINE) { this.#onLog?.("app-server response exceeded 2 MiB"); return; }
     let message: RpcResponse & { method?: string; params?: unknown };
     try { message = JSON.parse(line) as RpcResponse & { method?: string; params?: unknown }; } catch { this.#onLog?.("app-server emitted invalid JSON"); return; }
-    if (message.method && message.params && typeof message.params === "object") this.#onNotification?.({ method: message.method, params: message.params as Record<string, unknown> });
+    if (message.method && message.params && typeof message.params === "object") {
+      if (message.id !== undefined) {
+        this.#onRequest?.({ id: message.id, method: message.method, params: message.params as Record<string, unknown> });
+        return; // Bidirectional JSON-RPC request IDs are independent namespaces.
+      }
+      else this.#onNotification?.({ method: message.method, params: message.params as Record<string, unknown> });
+    }
     if (message.method === "thread/status/changed") {
       const params = message.params as { threadId?: unknown; status?: unknown };
       if (typeof params.threadId === "string" && params.status && typeof params.status === "object") this.#threadStatuses.set(params.threadId, params.status as AppServerThread["status"]);

@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { IngestEvent, ServerEvent, TaskSnapshot, TraceContext, TraceSpan } from "@codex-assistant/protocol";
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const TABLES = ["devices", "task_events", "tasks", "trace_spans"];
 const MAX_TRACE_SPANS = 100_000;
 

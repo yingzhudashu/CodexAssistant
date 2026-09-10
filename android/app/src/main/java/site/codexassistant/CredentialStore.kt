@@ -40,12 +40,6 @@ class CredentialStore(context: Context) {
             null
         }
     }
-    fun save(token: String) {
-        require(token.length >= 16)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val encrypted = cipher.iv + cipher.doFinal(token.toByteArray(StandardCharsets.UTF_8))
-        preferences.edit().putString("token", Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
-    }
     fun saveConnection(value: String, token: String) {
         require(token.length in 16..4096) { "Token 长度应为 16–4096 字符" }
         val normalized=value.trim().trimEnd('/')
@@ -57,16 +51,7 @@ class CredentialStore(context: Context) {
         check(preferences.edit().putString("apiUrl",normalized).putString("token",Base64.encodeToString(encrypted,Base64.NO_WRAP)).remove("cursor").commit()) { "安全存储失败，连接未保存" }
     }
     fun apiUrl(): String = preferences.getString("apiUrl", BuildConfig.CODEX_BASE_URL) ?: BuildConfig.CODEX_BASE_URL
-    /** 用户可填站点根地址或旧界面保存的 /codex-assistant 地址，线上请求统一使用站点根。 */
-    fun serverBaseUrl(): String = apiUrl().trimEnd('/').removeSuffix("/codex-assistant")
-    fun saveApiUrl(value: String) {
-        val normalized = value.trim().removeSuffix("/")
-        require(normalized.isNotBlank()) { "服务地址不能为空" }
-        val uri = try { URI(normalized) } catch (_: Exception) { throw IllegalArgumentException("服务地址无效") }
-        val loopback = uri.host == "localhost" || uri.host == "127.0.0.1" || uri.host == "::1" || uri.host == "[::1]"
-        require(uri.userInfo == null && (uri.scheme == "https" || (uri.scheme == "http" && loopback))) { "仅允许 HTTPS；本机调试可使用回环 HTTP" }
-        preferences.edit().putString("apiUrl", normalized).apply()
-    }
+    fun serverBaseUrl(): String = apiUrl().trimEnd('/')
     fun cursor(): Long = preferences.getLong("cursor", 0L)
     fun saveCursor(value: Long) { preferences.edit().putLong("cursor", value).apply() }
     fun clear() { preferences.edit().clear().apply() }

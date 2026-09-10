@@ -32,5 +32,11 @@ const protocol = readFileSync(resolve(root, "packages/protocol/src/index.ts"), "
 const schema = readFileSync(resolve(root, "apps/server/src/database.ts"), "utf8").match(/SCHEMA_VERSION\s*=\s*(\d+)/)?.[1];
 if (!protocol || !readme.includes(`\`${protocol}\``) || !release.includes(`\`${protocol}\``)) errors.push("README/release protocol differs from source");
 if (!schema || !readme.includes(`schema 为 **${schema}**`)) errors.push("README SQLite schema differs from source");
+for (const file of files) {
+  const text = readFileSync(file, "utf8");
+  for (const match of text.matchAll(/schema (?:当前为|为版本) (\d+)/g)) {
+    if (match[1] !== schema) errors.push(`${file}: current SQLite schema ${match[1]} differs from source ${schema}`);
+  }
+}
 if (errors.length) { console.error(errors.join("\n")); process.exit(1); }
 console.log(`docs: ${files.length} Markdown files checked; local links, download versions, protocol and SQLite schema are valid`);

@@ -1,6 +1,6 @@
 # Trace 设计
 
-服务端使用 OpenTelemetry SDK、AsyncLocalStorage 和 W3C propagator 管理标准上下文；SQLite exporter 使用有界批处理。桌面和 Android 当前使用自有轻量 span 记录器，发送同一 v2 Trace schema；不能视为三端已全部接入 OpenTelemetry SDK。系统不依赖外部 Collector。
+服务端使用 OpenTelemetry SDK、AsyncLocalStorage 和 W3C propagator 管理标准上下文；SQLite exporter 使用有界批处理。桌面和 Android 当前使用自有轻量 span 记录器，发送同一 v3 Trace schema；不能视为三端已全部接入 OpenTelemetry SDK。系统不依赖外部 Collector。
 
 trace ID 为 32 位小写十六进制，span ID 为 16 位小写十六进制。桌面端为每轮轮询生成 trace context，RPC 和轮询诊断使用该链路。每个 outbox 事件另建 trace context，通过 W3C `traceparent` 传给 HTTP 接收端；server.ingest 使用事件上下文创建子 span。两者并非一棵完整的跨端 trace 树。
 
@@ -9,7 +9,7 @@ trace ID 为 32 位小写十六进制，span ID 为 16 位小写十六进制。�
 桌面端本地 trace 位于用户数据目录的 `state/outbox.json.trace.jsonl`，写入请求使用 mode 0600（Windows 上实际访问控制仍由用户目录 ACL 决定）。服务端查询示例：
 
 ```text
-GET /codex-assistant/api/v2/traces/<32位traceId>
+GET /codex-assistant/api/v3/traces/<32位traceId>
 Authorization: Bearer <token>
 ```
 

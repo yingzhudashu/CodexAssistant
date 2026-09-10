@@ -2,17 +2,17 @@
 
 CodexAssistant 是独立的 Codex 任务进度同步工具：Windows Electron 托盘端通过官方 `codex app-server` JSON-RPC 读取线程元数据，并从其返回的本机会话文件中增量提取开始、完成和中止事件，完成脱敏后通过 HTTPS 上传；Fastify 服务端写入 SQLite 并以 WebSocket 推送；Android Compose 客户端显示任务与本地通知，通过前台服务保持同步。
 
-当前客户端版本：Windows **2.0.10**、Android **2.0.8**（Android versionCode **11**）；协议为 `codex-assistant.v2`，SQLite schema 为 **5**。根工作区、服务端和协议包的 npm 版本仍为 2.0.0，不代表客户端安装包版本。
+当前已发布版本（2026-09-10）：Windows **2.0.12**、Android **2.0.10**（Android versionCode **13**）；协议为 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端和协议包的 npm 版本仍为 2.0.0，不代表客户端安装包版本。
 
-- [Windows 安装包](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.10.exe)（未签名）
-- [Android APK](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.8.apk)（release keystore 签名）
+- [Windows 安装包](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.12.exe)（未签名）
+- [Android APK](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.10.apk)（release 签名）
 - [在线更新清单](https://server.example.com/codex-assistant/downloads/manifest.json)
 
 Windows 与 Android 填写同一站点根地址，例如 `https://server.example.com`，以及服务端配置的访问 Token。不要在地址末尾追加 API 路径。两端均提供检查更新与下载入口，下载由系统浏览器处理。
 
 ## 当前版本边界
 
-- 协议固定为 `codex-assistant.v2`，未知字段、错误协议版本和旧 SQLite schema 直接拒绝。
+- 协议固定为 `codex-assistant.v3`，未知字段、错误协议版本和旧 SQLite schema 直接拒绝。
 - 任务状态同时包含 Goal 状态、官方线程运行态、active flags、最近 Turn 结果和数据新鲜度；Goal 优先，失败和中止的 Turn 优先于线程运行态；其余组合按[状态规则](docs/protocol.zh-CN.md)处理。
 - 本机历史开始记录不永久等于运行中：普通静默回合 30 分钟后进入待确认；当前回合仍有 `inProgress` 操作时会保留进行中状态最多 6 小时，并以缓存状态展示。明确的官方运行状态不受这些窗口影响。
 - 不上传完整对话、文件内容、命令正文/输出、绝对路径或隐藏推理。
@@ -72,7 +72,7 @@ Android 发布包需通过签名校验；当前 Windows 发布包未签名。真
 
 ## 质量与性能
 
-桌面轮询固定 2 秒，但仅在线程元数据或计划修订变化时重新读取详情；详情 RPC 最大并发 8、单请求超时 15 秒。上传有 10 秒超时、指数退避和 5000 条 outbox 上限。服务端限制 HTTP body 128 KiB、WebSocket 入站消息 32 KiB；单次回放最多 500 条，随后由快照校准最新状态，并在 health 接口返回 RSS、订阅数和数据库计数。桌面 Trace 追加到本地 JSONL，Android 使用内存队列上传；只有服务端接入 OpenTelemetry SDK。服务端保留最近十万条 span，其他限制见 [Trace 说明](docs/trace.zh-CN.md)。见 [`docs/performance.zh-CN.md`](docs/performance.zh-CN.md)。
+桌面轮询固定 2 秒，但仅在线程元数据或计划修订变化时重新读取详情；详情 RPC 最大并发 8、单请求超时 15 秒。上传有 10 秒超时、指数退避和 5000 条 outbox 上限。服务端限制 HTTP body 128 KiB、WebSocket 入站消息 128 KiB；单次回放最多 500 条，随后由快照校准最新状态，并在 health 接口返回 RSS、订阅数和数据库计数。桌面 Trace 追加到本地 JSONL，Android 使用内存队列上传；只有服务端接入 OpenTelemetry SDK。服务端保留最近十万条 span，其他限制见 [Trace 说明](docs/trace.zh-CN.md)。见 [`docs/performance.zh-CN.md`](docs/performance.zh-CN.md)。
 
 ## 文档入口
 

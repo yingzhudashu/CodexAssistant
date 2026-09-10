@@ -1,7 +1,7 @@
 import { join } from "node:path";
-import { rm } from "node:fs/promises";
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } from "electron";
 import { loadDesktopConnection, saveDesktopConnection } from "./desktop-config.js";
+import { isNewerVersion } from "./updates.js";
 import { Monitor, type MonitorStatus } from "./monitor.js";
 import type { TaskSnapshot } from "@codex-assistant/protocol";
 
@@ -49,14 +49,7 @@ async function startMonitor(): Promise<void> {
   const connection = await loadDesktopConnection();
   if (!connection.configured || !connection.apiUrl || !connection.token || !connection.deviceId) return;
   const stateDirectory = join(app.getPath("userData"), "state");
-  try {
-    monitor = await Monitor.create({ stateDirectory, apiUrl: connection.apiUrl, token: connection.token, deviceId: connection.deviceId, onTasks: (tasks) => { latestTasks = tasks; window?.webContents.send("tasks.updated", tasks); }, onStatus: (status) => { monitorStatus = status; window?.webContents.send("sync.status", status); } });
-  } catch (error) {
-    if (!(error instanceof Error) || error.message !== "OUTBOX_INVALID") throw error;
-    // 旧协议或损坏 outbox 无法安全恢复，直接清理并从空队列重新开始。
-    await rm(join(stateDirectory, "outbox.json"), { force: true });
-    monitor = await Monitor.create({ stateDirectory, apiUrl: connection.apiUrl, token: connection.token, deviceId: connection.deviceId, onTasks: (tasks) => { latestTasks = tasks; window?.webContents.send("tasks.updated", tasks); }, onStatus: (status) => { monitorStatus = status; window?.webContents.send("sync.status", status); } });
-  }
+  monitor = await Monitor.create({ stateDirectory, apiUrl: connection.apiUrl, token: connection.token, deviceId: connection.deviceId, onTasks: (tasks) => { latestTasks = tasks; window?.webContents.send("tasks.updated", tasks); }, onStatus: (status) => { monitorStatus = status; window?.webContents.send("sync.status", status); } });
   await monitor.start();
 }
 function registerIpc(): void {
@@ -64,8 +57,10 @@ function registerIpc(): void {
   ipcMain.handle("connection.save", async (event, input: unknown) => { assertTrustedSender(event); if (!input || typeof input !== "object") throw new Error("DESKTOP_CONNECTION_INVALID"); const value = input as Record<string, unknown>; if (typeof value.apiUrl !== "string" || typeof value.token !== "string") throw new Error("DESKTOP_CONNECTION_INVALID"); await monitor?.stop(); monitor = undefined; const saved = await saveDesktopConnection({ apiUrl: value.apiUrl, token: value.token }); await startMonitor(); return { configured: saved.configured, apiUrl: saved.apiUrl, deviceId: saved.deviceId }; });
   ipcMain.handle("task.detail", async (event, input: unknown) => { assertTrustedSender(event); if (!monitor || !input || typeof input !== "object" || typeof (input as { threadId?: unknown }).threadId !== "string") throw new Error("TASK_INVALID"); return monitor.readDetail((input as { threadId: string }).threadId, typeof (input as { cursor?: unknown }).cursor === "string" ? (input as { cursor: string }).cursor : undefined); });
   ipcMain.handle("task.send", async (event, input: unknown) => { assertTrustedSender(event); if (!monitor || !input || typeof input !== "object") throw new Error("MESSAGE_INVALID"); const value = input as Record<string, unknown>; if (typeof value.threadId !== "string" || typeof value.text !== "string") throw new Error("MESSAGE_INVALID"); return monitor.sendMessage(value.threadId, value.text); });
-  ipcMain.handle("update.check", async (event) => { assertTrustedSender(event); const connection = await loadDesktopConnection(); if (!connection.apiUrl) throw new Error("DESKTOP_NOT_CONFIGURED"); const response = await fetch(`${connection.apiUrl}/codex-assistant/downloads/manifest.json`, { signal: AbortSignal.timeout(8_000) }); if (!response.ok) throw new Error("UPDATE_CHECK_FAILED"); const manifest = await response.json() as { version?: unknown; downloads?: { windows?: { url?: unknown }; android?: { url?: unknown } } }; const version = typeof manifest.version === "string" ? manifest.version : ""; return { currentVersion: app.getVersion(), latestVersion: version, available: Boolean(version && version !== app.getVersion()), windowsUrl: typeof manifest.downloads?.windows?.url === "string" ? manifest.downloads.windows.url : undefined, androidUrl: typeof manifest.downloads?.android?.url === "string" ? manifest.downloads.android.url : undefined }; });
+  ipcMain.handle("update.check", async (event) => { assertTrustedSender(event); const connection = await loadDesktopConnection(); if (!connection.apiUrl) throw new Error("DESKTOP_NOT_CONFIGURED"); const response = await fetch(`${connection.apiUrl}/codex-assistant/downloads/manifest.json`, { signal: AbortSignal.timeout(8_000) }); if (!response.ok) throw new Error("UPDATE_CHECK_FAILED"); const manifest = await response.json() as { version?: unknown; downloads?: { windows?: { url?: unknown }; android?: { url?: unknown } } }; const version = typeof manifest.version === "string" ? manifest.version : ""; return { currentVersion: app.getVersion(), latestVersion: version, available: isNewerVersion(version, app.getVersion()), windowsUrl: typeof manifest.downloads?.windows?.url === "string" ? manifest.downloads.windows.url : undefined, androidUrl: typeof manifest.downloads?.android?.url === "string" ? manifest.downloads.android.url : undefined }; });
   ipcMain.handle("update.download", async (event, target: unknown) => { assertTrustedSender(event); if (target !== "windows" && target !== "android") throw new Error("UPDATE_TARGET_INVALID"); const connection = await loadDesktopConnection(); if (!connection.apiUrl) throw new Error("DESKTOP_NOT_CONFIGURED"); const response = await fetch(`${connection.apiUrl}/codex-assistant/downloads/manifest.json`, { signal: AbortSignal.timeout(8_000) }); if (!response.ok) throw new Error("UPDATE_CHECK_FAILED"); const manifest = await response.json() as { downloads?: Record<string, { url?: unknown }> }; const url = manifest.downloads?.[target]?.url; if (typeof url !== "string" || !/^https:\/\//i.test(url)) throw new Error("UPDATE_URL_INVALID"); await shell.openExternal(url); return { opened: true }; });
+  ipcMain.handle("interactions.get", (event) => { assertTrustedSender(event); return monitor?.interactions ?? []; });
+  ipcMain.handle("interaction.submit", (event, input: unknown) => { assertTrustedSender(event); const v = input as Record<string, unknown>; if (!monitor || !v || typeof v.requestId !== "string" || typeof v.threadId !== "string") throw new Error("INTERACTION_INVALID"); return monitor.submitInteraction(v.requestId, v.threadId, v.value); });
   ipcMain.handle("tasks.get", (event) => { assertTrustedSender(event); return latestTasks; });
   ipcMain.handle("sync.status", (event) => { assertTrustedSender(event); return monitorStatus; });
   ipcMain.handle("workstation.status", (event) => { assertTrustedSender(event); return { ready: monitor?.workstationReady === true }; });
@@ -76,5 +71,5 @@ else {
   app.on("second-instance", showWindow);
   app.whenReady().then(async () => { app.setAppUserModelId("site.codexassistant"); app.setLoginItemSettings({ openAtLogin: true }); registerIpc(); window = createWindow(); createTray(); await startMonitor().catch(() => { monitorStatus = "offline"; window?.webContents.send("sync.status", monitorStatus); }); app.on("activate", showWindow); }).catch((error) => console.error(error));
 }
-app.on("before-quit", (event) => { if (quitting) return; event.preventDefault(); quitting = true; void monitor?.stop().finally(() => app.quit()); });
+app.on("before-quit", (event) => { if (quitting) return; event.preventDefault(); quitting = true; void (monitor?.stop() ?? Promise.resolve()).catch(() => console.error("Monitor shutdown failed")).finally(() => app.quit()); });
 app.on("window-all-closed", () => undefined);
