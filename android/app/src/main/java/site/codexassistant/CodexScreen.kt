@@ -130,7 +130,7 @@ private fun openDownload(context:android.content.Context,url:String?) {
                         } }
                         state.error?.let{item{Text(it,color=MaterialTheme.colorScheme.error);TextButton(onEditConnection){Text("编辑连接")}}}
                         if(!state.connected && state.tasks.isEmpty()) item{Text("等待同步任务；连接恢复后自动更新。")}
-                        val rows=state.tasks.filter{(filter=="all"||it.status==filter)&&(query.isBlank()||"${it.title} ${it.projectName.orEmpty()}".contains(query,true))}
+                        val rows=state.tasks.filter{(filter=="all"||canonicalTaskStatus(it.status)==filter)&&(query.isBlank()||"${it.title} ${it.projectName.orEmpty()}".contains(query,true))}
                         if(state.connected && rows.isEmpty()) item{Text(if(query.isBlank()&&filter=="all") "暂无任务，在工作站开始任务后会显示在这里。" else "没有匹配任务，请调整搜索或筛选。")}
                         items(rows,key={it.id}){task->TaskCard(task,task.id==selectedId){selectedId?.let(vm::closeDetail);selectedId=task.id;vm.loadDetail(task.id)}}
                     }
@@ -166,6 +166,7 @@ private fun openDownload(context:android.content.Context,url:String?) {
         }
         LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if(tab==0) {
+                item{Text("任务概览",style=MaterialTheme.typography.titleMedium);HorizontalDivider()}
                 task.goal?.let{item{Text(it.objective);Text("Token ${it.tokensUsed}${it.tokenBudget?.let{b->" / $b"}?:""} · ${it.timeUsedSeconds} 秒")}}
                 task.error?.let{item{Text(it.message,color=MaterialTheme.colorScheme.error)}}
                 if(task.activeFlags.contains("waitingOnApproval")) item{Text("请在工作站处理审批")}
@@ -174,12 +175,14 @@ private fun openDownload(context:android.content.Context,url:String?) {
                 items(task.plan,key={it.id}){step->OutlinedCard(Modifier.fillMaxWidth()){Column(Modifier.padding(12.dp)){Text(step.title);Text(mapOf("pending" to "待开始","in_progress" to "执行中","completed" to "完成","failed" to "失败")[step.status]?:step.status)}}}
                 item{Text("状态变化：${formatTime(task.changedAt)}",style=MaterialTheme.typography.bodySmall)}
             } else if(tab==1) {
+                item{Text("回合摘要",style=MaterialTheme.typography.titleMedium);HorizontalDivider()}
                 if(task.id in state.loadingDetails) item{LinearProgressIndicator(Modifier.fillMaxWidth());Text("正在读取回合…")}
                 state.detailErrors[task.id]?.let{item{Text(it,color=MaterialTheme.colorScheme.error);TextButton({vm.loadDetail(task.id)}){Text("重试读取")}}}
                 if(detail?.turns?.isEmpty()==true) item{Text("暂无回合摘要")}
                 items(detail?.turns ?: emptyList()){turn->OutlinedCard(Modifier.fillMaxWidth()){Text(readableTurn(turn),Modifier.padding(12.dp))}}
                 detail?.cursor?.let{cursor->item{OutlinedButton({vm.loadDetail(task.id,cursor)},enabled=task.id !in state.loadingDetails && state.connected){Text("加载更早回合")}}}
             } else {
+                item{Text("发送消息",style=MaterialTheme.typography.titleMedium);HorizontalDivider()}
                 item{Text("消息由已连接的工作站处理。工作站审批需在工作站完成。")}
                 if(!state.connected) item{Text("连接不可用，草稿保留，恢复连接后可发送。",color=MaterialTheme.colorScheme.error)}
                 item{OutlinedTextField(draft,{draft=it},Modifier.fillMaxWidth(),label={Text("消息")},minLines=3,maxLines=8,supportingText={Text("${draft.length} / 20000")},isError=draft.length>20000)}
