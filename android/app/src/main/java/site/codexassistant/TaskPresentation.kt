@@ -9,14 +9,9 @@ private val taskTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss
 
 val taskStatusFilters = listOf(
     "all" to "全部",
-    "active" to "进行中",
-    "waiting" to "等待处理",
-    "paused" to "已暂停",
-    "blocked" to "已阻塞",
-    "usage_limited" to "用量受限",
-    "budget_limited" to "预算受限",
-    "idle" to "空闲",
-    "complete" to "已完成",
+    "running" to "进行中",
+    "needs_action" to "需要处理",
+    "completed" to "已完成",
     "failed" to "失败",
 )
 
@@ -29,16 +24,19 @@ fun formatTime(value: String, zone: ZoneId = ZoneId.systemDefault()): String = t
 
 /** 卡片与通知共用同一份状态语义，新增状态不能只改界面。 */
 fun statusLabel(status: String): String = when (status) {
-    "active" -> "进行中"
-    "waiting" -> "等待处理"
-    "paused" -> "已暂停"
-    "blocked" -> "已阻塞"
-    "usage_limited" -> "用量受限"
-    "budget_limited" -> "预算受限"
-    "idle" -> "空闲"
-    "complete" -> "已完成"
+    "active", "idle" -> "进行中"
+    "waiting", "paused", "blocked", "usage_limited", "budget_limited" -> "需要处理"
+    "complete", "completed" -> "已完成"
     "failed" -> "失败"
     else -> "未知状态"
+}
+
+fun canonicalTaskStatus(status: String): String = when (status) {
+    "active", "idle" -> "running"
+    "waiting", "paused", "blocked", "usage_limited", "budget_limited" -> "needs_action"
+    "complete", "completed" -> "completed"
+    "failed" -> "failed"
+    else -> "needs_action"
 }
 
 data class TaskNotice(val title: String, val text: String, val detail: String, val silent: Boolean)

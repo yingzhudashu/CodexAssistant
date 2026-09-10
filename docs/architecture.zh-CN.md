@@ -50,3 +50,7 @@ Android 使用进程内 SyncCoordinator 统一入口；Compose 订阅 StateFlow�
 ## 2026-09-10 IME 实现约束
 
 Android 仅允许外层会话详情消费 IME Insets，子控件不得重复 padding；协议和发送语义保持不变。
+
+## 2026-09-10 状态归一化与 Android 页面栈
+
+服务端继续返回协议原始状态，客户端通过 canonicalTaskStatus 映射为 running、needs_action、completed、failed 四类展示状态；不新增数据库字段或接口枚举。Android 详情页由页面栈管理返回，页面层级和分区由客户端渲染。
