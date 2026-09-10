@@ -27,7 +27,7 @@ class ClientRegressionTest {
     }
 
     @Test fun everyProtocolTaskStateCanBeFilteredUsingItsNotificationLabel() {
-        val statuses = listOf("active", "waiting", "paused", "blocked", "usage_limited", "budget_limited", "idle", "complete", "failed")
+        val statuses = listOf("running", "needs_action", "completed", "failed")
         assertEquals(listOf("all") + statuses, taskStatusFilters.map { it.first })
         for ((id, label) in taskStatusFilters.drop(1)) assertEquals(statusLabel(id), label)
     }
@@ -86,7 +86,7 @@ class ClientRegressionTest {
         val completed = notices.change(waiting, task.copy(status = "complete"), 200)
         assertTrue(completed.silent)
         assertTrue(completed.title.startsWith("已完成"))
-        assertEquals("等待处理 → 已完成", completed.text)
+        assertEquals("需要处理 → 已完成", completed.text)
         assertFalse(notices.change(task, task.copy(status = "failed"), 10_100).silent)
         for (status in listOf("active", "waiting", "paused", "blocked", "usage_limited", "budget_limited", "idle", "complete", "failed")) assertNotEquals("未知状态", statusLabel(status))
     }

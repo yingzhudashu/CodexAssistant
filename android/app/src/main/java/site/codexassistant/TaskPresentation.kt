@@ -24,6 +24,8 @@ fun formatTime(value: String, zone: ZoneId = ZoneId.systemDefault()): String = t
 
 /** 卡片与通知共用同一份状态语义，新增状态不能只改界面。 */
 fun statusLabel(status: String): String = when (status) {
+    "running" -> "进行中"
+    "needs_action" -> "需要处理"
     "active", "idle" -> "进行中"
     "waiting", "paused", "blocked", "usage_limited", "budget_limited" -> "需要处理"
     "complete", "completed" -> "已完成"
