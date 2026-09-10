@@ -1,0 +1,39 @@
+const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
+const { resolve, join } = require('node:path');
+const { mkdtempSync, writeFileSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+app.disableHardwareAcceleration();
+const directory = mkdtempSync(join(tmpdir(), 'codex-electron-acceptance-'));
+app.setPath('userData', directory);
+const artifact = resolve('artifacts/acceptance-2026-09-10');
+const report = { preload: false, settings: false, interaction: false, dark: false, trayIcon: false, errors: [] };
+app.whenReady().then(async () => {
+  const tasks = [{ id: 'synthetic-thread', title: '验收示例任务', status: 'needs_action', freshness: 'fresh', runtimeStatus: 'idle', activeFlags: [], plan: [], updatedAt: new Date().toISOString(), changedAt: new Date().toISOString() }];
+  let requests = [{ type: 'interaction.request', protocolVersion: 'codex-assistant.v3', requestId: 'synthetic-input', threadId: tasks[0].id, kind: 'single_select', title: '请选择执行计划', questions: [{ id: 'plan', header: '执行计划', question: '选择下一步操作', required: true, multiple: false, isOther: true, options: [{ id: 'a', label: '继续实现' }, { id: 'b', label: '调整计划' }] }] }];
+  for (const [name, value] of Object.entries({ 'connection.get': { configured: true, apiUrl: 'https://example.test', deviceId: 'synthetic' }, 'tasks.get': tasks, 'sync.status': 'connected', 'workstation.status': { ready: true } })) ipcMain.handle(name, () => value);
+  ipcMain.handle('interactions.get', () => requests);
+  ipcMain.handle('task.detail', () => ({ turns: [] }));
+  ipcMain.handle('interaction.submit', (_event, input) => { if (input.value.answers.plan.answers[0] !== '继续实现') throw new Error('ANSWER_MISMATCH'); requests = []; report.interaction = true; return { status: 'submitted' }; });
+  const win = new BrowserWindow({ show: false, width: 1100, height: 760, webPreferences: { contextIsolation: true, sandbox: true, preload: resolve('apps/desktop/dist/preload.cjs') } });
+  win.webContents.on('preload-error', (_event, _path, error) => report.errors.push(error.message));
+  win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') report.errors.push(details.message); });
+  const check = async (code) => { for (let i = 0; i < 80; i++) { if (await win.webContents.executeJavaScript(code)) return; await new Promise(r => setTimeout(r, 100)); } throw new Error('UI_TIMEOUT: ' + code); };
+  try {
+    await win.loadFile(resolve('apps/desktop/dist/renderer/index.html'));
+    await check('document.body.innerText.includes("任务工作台")');
+    report.preload = await win.webContents.executeJavaScript('typeof window.codexAssistant.getInteractions === "function"');
+    await win.webContents.executeJavaScript('document.querySelector("[data-page=appearance]").click()');
+    await check('document.body.innerText.includes("颜色主题")'); report.settings = true;
+    await win.webContents.executeJavaScript('document.querySelector("input[value=dark]").click()');
+    await check('document.documentElement.dataset.theme === "dark"'); report.dark = true;
+    writeFileSync(join(artifact, 'windows-settings-dark.png'), (await win.webContents.capturePage()).toPNG());
+    await win.webContents.executeJavaScript('document.querySelector("[data-page=tasks]").click(); document.querySelector("[data-task]").click()');
+    await check('document.querySelector("[data-interaction]") !== null');
+    writeFileSync(join(artifact, 'windows-interaction.png'), (await win.webContents.capturePage()).toPNG());
+    await win.webContents.executeJavaScript('document.querySelector("[data-option=\\"0\\"]").click(); document.querySelector("[data-interaction]").requestSubmit()');
+    await check('document.querySelector("[data-interaction]") === null');
+    report.trayIcon = !nativeImage.createFromPath(resolve('apps/desktop/dist/assets/tray.ico')).isEmpty();
+  } catch (error) { report.errors.push(error.message); }
+  finally { writeFileSync(join(artifact, 'electron-smoke.json'), JSON.stringify(report, null, 2)); win.destroy(); app.quit(); }
+});
+app.on('will-quit', () => { try { rmSync(directory, { recursive: true, force: true }); } catch {} });

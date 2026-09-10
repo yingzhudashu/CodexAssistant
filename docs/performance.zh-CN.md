@@ -6,7 +6,7 @@
 
 - 桌面轮询周期：2 秒；详情 RPC 最大并发：8；单 RPC 超时：15 秒。
 - 上传请求超时：10 秒；失败采用指数退避，最大 60 秒；outbox 最大 5000 条。
-- 服务端 HTTP body 最大 128 KiB；WebSocket 客户端入站单消息最大 32 KiB；单次游标回放最多 500 条。
+- 服务端 HTTP body 最大 128 KiB；WebSocket 客户端入站单消息最大 128 KiB；单次游标回放最多 500 条。
 - Android 前台服务只维护一个 OkHttp WebSocket，连接超时 10 秒、30 秒 ping；cursor 持久化到 SharedPreferences，访问 Token 单独使用 Keystore 加密。Compose 界面复用进程内 `SyncCoordinator` 状态流，不重复建连。
 - Android 前台服务常驻通知使用 `IMPORTANCE_LOW` 渠道；任务状态或当前步骤变化使用独立 `IMPORTANCE_DEFAULT` 渠道。通知正文只包含脱敏后的标题、状态和步骤，不包含命令、路径或输出。
 
@@ -33,3 +33,5 @@ health 接口返回进程 RSS、运行秒数、WebSocket 订阅数、事件数�
 服务端 Trace 在启动时及每千次写入后按接收顺序保留最新 100,000 条，清理间隔内最多多出 999 条；客户端时间不会改变保留顺序。清理不作用于 task_events/tasks，也不主动 VACUUM，因此 SQLite 已分配的磁盘空间可能保留供后续复用。十万条记录的保留、重复写入和重启清理已有回归测试。
 
 Android 通知按同步状态流观察到的变化更新最新状态，十秒节流只限制声音。游标回放期间不提示历史变化，首次快照后才启用实时变化通知。
+
+2026-09-10 持续同步实测：30 分钟，1000 个任务，4450 个 HTTP 入站事件与 WebSocket 接收，5 次重连，最终快照一致；预热后 RSS 105.0–114.1 MiB，末次累计单核 CPU 0.93%。末分钟入站 P95 12.4ms，最慢分钟 P95 305.3ms（同时运行构建与模拟器）。这是本机开发环境测量，不是全端生产 SLA。证据和边界见 [验收记录](acceptance.zh-CN.md)。

@@ -27,7 +27,7 @@ class ClientRegressionTest {
     }
 
     @Test fun everyProtocolTaskStateCanBeFilteredUsingItsNotificationLabel() {
-        val statuses = listOf("running", "needs_action", "completed", "failed")
+        val statuses = listOf("running", "completed", "failed", "needs_action")
         assertEquals(listOf("all") + statuses, taskStatusFilters.map { it.first })
         for ((id, label) in taskStatusFilters.drop(1)) assertEquals(statusLabel(id), label)
     }
@@ -42,7 +42,7 @@ class ClientRegressionTest {
         assertEquals("时间不可用", formatTime("2026-09-08 16:30:00", china))
     }
 
-    private val manifest = """{"product":"CodexAssistant","protocolVersion":"codex-assistant.v2","downloads":{"android":{"versionName":"2.0.3","versionCode":6,"url":"https://robotclaw.site/app.apk"},"windows":{"url":"https://robotclaw.site/app.exe"}}}"""
+    private val manifest = """{"product":"CodexAssistant","protocolVersion":"codex-assistant.v3","downloads":{"android":{"versionName":"2.0.3","versionCode":6,"url":"https://robotclaw.site/app.apk"},"windows":{"url":"https://robotclaw.site/app.exe"}}}"""
 
     @Test fun updateRequestLeavesTheCallingUiThread() {
         var networkThread = ""
@@ -62,7 +62,7 @@ class ClientRegressionTest {
     }
 
     @Test fun updateRejectsWrongProtocolAndUnsafeDownloads() {
-        for (invalid in listOf(manifest.replace("codex-assistant.v2", "codex-assistant.v1"), manifest.replace("https://robotclaw.site/app.apk", "http://robotclaw.site/app.apk"))) {
+        for (invalid in listOf(manifest.replace("codex-assistant.v3", "codex-assistant.v1"), manifest.replace("https://robotclaw.site/app.apk", "http://robotclaw.site/app.apk"))) {
             assertThrows(IllegalArgumentException::class.java) { UpdateChecker.parse(invalid) }
         }
     }
@@ -79,15 +79,15 @@ class ClientRegressionTest {
     }
 
     @Test fun notificationThrottlePreservesTheFinalStateAndAllStatusLabels() {
-        val task = TaskSnapshot("task", "任务名称", status = "active", runtimeStatus = "notLoaded", freshness = "fresh", source = "thread", updatedAt = "2026-09-08T00:00:00Z", changedAt = "2026-09-08T00:00:00Z")
+        val task = TaskSnapshot("task", "任务名称", status = "running", runtimeStatus = "notLoaded", freshness = "fresh", source = "thread", updatedAt = "2026-09-08T00:00:00Z", changedAt = "2026-09-08T00:00:00Z")
         val notices = TaskNotices()
-        val waiting = task.copy(status = "waiting")
+        val waiting = task.copy(status = "needs_action")
         assertFalse(notices.change(task, waiting, 100).silent)
-        val completed = notices.change(waiting, task.copy(status = "complete"), 200)
+        val completed = notices.change(waiting, task.copy(status = "completed"), 200)
         assertTrue(completed.silent)
         assertTrue(completed.title.startsWith("已完成"))
-        assertEquals("需要处理 → 已完成", completed.text)
+        assertEquals("待确认 → 已完成", completed.text)
         assertFalse(notices.change(task, task.copy(status = "failed"), 10_100).silent)
-        for (status in listOf("active", "waiting", "paused", "blocked", "usage_limited", "budget_limited", "idle", "complete", "failed")) assertNotEquals("未知状态", statusLabel(status))
+        for (status in listOf("running", "completed", "failed", "needs_action")) assertNotEquals("未知状态", statusLabel(status))
     }
 }

@@ -7,3 +7,11 @@
 .rich-text{min-width:0;font-size:15px;line-height:24px;overflow-wrap:anywhere}.rich-text h3{font-size:16px;line-height:24px;margin:12px 0 6px}.rich-list{margin:2px 0}.rich-code{overflow:auto;padding:12px;border-radius:8px;background:var(--selected);font:13px/20px Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.rich-math{font:13px/20px "Cambria Math",Consolas,serif;color:var(--primary);padding:0 3px}.rich-table-wrap{max-width:100%;overflow-x:auto;margin:8px 0}.rich-table-wrap table{border-collapse:collapse;min-width:360px;width:100%;font-size:13px}.rich-table-wrap th,.rich-table-wrap td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}.rich-table-wrap th{background:var(--selected);font-weight:650}
 .app-header{min-height:56px;padding:8px 24px}.app-header h1{font-size:20px;line-height:28px}.tasks-workspace{gap:16px;padding:20px 24px}.with-detail .task-list{flex:0 1 320px}.task-detail{flex:1 1 auto}.detail-heading{padding:18px 20px 10px}.detail-scroll{padding:20px;gap:14px}.surface{padding:20px}.list-tools{margin-bottom:16px}.composer-wrap{padding:12px 24px}
 @media(max-width:839px){.app-header{padding:8px 16px}.tasks-workspace{padding:12px 16px}.with-detail .task-list{display:none}.detail-scroll{padding:16px 8px}.composer-wrap{padding:8px 16px 12px}}
+
+[data-interaction] fieldset { display: flex; flex-direction: column; align-items: stretch; gap: 12px; min-width: 0; }
+[data-interaction] fieldset label { display: flex; align-items: center; gap: 10px; min-height: 44px; flex-wrap: wrap; }
+[data-interaction] fieldset label:has([data-text]) { flex-direction: column; align-items: stretch; }
+[data-interaction] input[type=radio], [data-interaction] input[type=checkbox] { width: 20px; height: 20px; flex: 0 0 20px; }
+[data-interaction] [data-text] { width: 100%; }
+[data-interaction] p, [data-interaction] small { white-space: pre-wrap; overflow-wrap: anywhere; }
+:root[data-theme=dark] .tabs button[aria-current=page] { color: #A8D0FF; }

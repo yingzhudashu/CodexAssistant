@@ -28,7 +28,7 @@ def rect(x,y,w,h,fill=None,r=8,stroke=None):
 def svg(w,h,body,title):
     return f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img"><title>{esc(title)}</title><style>text{{font-family:"Microsoft YaHei","Segoe UI",sans-serif}}</style>{rect(0,0,w,h,T["bg"],0)}{body}</svg>'
 def save(name,content):
-    (ASSET/name).write_text(content,encoding='utf-8'); return 'design-assets/final/'+name
+    (ASSET/name).write_text(content,encoding='utf-8',newline='\n'); return 'design-assets/final/'+name
 def button(x,y,label,primary=False,w=None):
     w=w or max(112, min(330,len(label)*16+32))
     return rect(x,y,w,44,T['primary'] if primary else T['surface'],8)+text(x+16,y+28,label,14,'#FFFFFF' if primary else T['text']), w
@@ -258,7 +258,7 @@ def render():
         '所有相对源码路径相对于当前项目根目录。渲染命令：`python docs/frontend-design/render.py`。静态复核命令：`python docs/frontend-design/validate.py`（Python 3、playwright、Pillow，以及本机Microsoft Edge）。渲染只写当前项目的设计文档和 final 图稿；不会写产品源码或请求外部接口。源码 SHA-256 与 HEAD 记录在 source-baseline.json，包含本次审查时的工作区内容，不等同于只读已提交版本。',
         '设计方法参考：[imagegen-frontend-mobile](https://github.com/diuzhev26-glitch/imagegen-frontend-mobile)。采用其平台原生、可读性、连续屏幕一致性要求；本交付为精确 SVG 线框/结构图，未调用外部绘图服务。']
     full=re.sub(r'(?m)(?<=\|)\n(?:[ \t]*\n)+(?=\|)', '\n', '\n\n'.join(md))
-    (DOC/'frontend-design.zh-CN.md').write_text(full+'\n',encoding='utf-8')
+    (DOC/'frontend-design.zh-CN.md').write_text(full+'\n',encoding='utf-8',newline='\n')
     # Full markdown rendered with a bundled zero-dependency table/image renderer.
     def mdhtml(raw):
         out=[]; table=[]; code=False
@@ -287,6 +287,6 @@ def render():
         flush();return ''.join(out)
     nav=''.join(f'<a href="#{s["id"].lower()}">{s["id"]} {s["title"]}</a>' for s in SPEC['screens'])
     css=f'body{{margin:0;background:{T["bg"]};color:{T["text"]};font:16px/1.7 "Microsoft YaHei","Segoe UI",sans-serif}}aside{{position:fixed;width:244px;top:0;bottom:0;padding:24px 16px;overflow:auto;background:{T["surface"]}}}aside a{{display:block;padding:8px;font-size:13px}}main{{margin-left:280px;padding:32px;max-width:1440px}}a{{color:{T["primary"]}}}img{{max-width:100%;max-height:900px;display:block;margin:20px auto;background:white;border:1px solid {T["border"]}}}.table{{overflow:auto}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid {T["border"]};padding:12px;vertical-align:top;min-width:110px}}h2{{margin-top:70px;border-top:2px solid {T["border"]};padding-top:24px}}code{{word-break:break-word;background:{T["selected"]};padding:2px 5px}}@media(max-width:800px){{aside{{position:static;width:auto;max-height:230px}}main{{margin:0;padding:16px}}}}'
-    (HERE/'index.html').write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{NAME} Final 1.0</title><style>{css}</style><aside><strong>{NAME}</strong><p>Final 1.0 · 界面索引</p>{nav}</aside><main>{mdhtml(full)}</main></html>',encoding='utf-8')
+    (HERE/'index.html').write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{NAME} Final 1.0</title><style>{css}</style><aside><strong>{NAME}</strong><p>Final 1.0 · 界面索引</p>{nav}</aside><main>{mdhtml(full)}</main></html>',encoding='utf-8',newline='\n')
     print(NAME,len(SPEC['screens']),'screens',sum(len(s['actions']) for s in SPEC['screens']),'interactions',len(list(ASSET.glob('*.svg'))),'figures')
 if __name__=='__main__':render()

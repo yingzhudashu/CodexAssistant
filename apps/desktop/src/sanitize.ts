@@ -26,28 +26,23 @@ export function projectName(cwd: unknown): string | undefined {
 export function normalizeStatus(value: unknown): TaskStatus {
   if (value && typeof value === "object") value = (value as { type?: unknown }).type;
   switch (value) {
-    case "active": case "paused": case "blocked": return value;
-    case "usageLimited": return "usage_limited";
-    case "budgetLimited": return "budget_limited";
-    case "waiting": case "idle": case "complete": case "failed": return value;
-    case "completed": return "complete";
-    case "systemError": case "error": return "failed";
-    default: return "idle";
+    case "active": case "running": return "running";
+    case "completed": return "completed";
+    case "failed": case "systemError": return "failed";
+    case "needs_action": return "needs_action";
+    default: return "needs_action";
   }
 }
 
 export function normalizeRuntimeStatus(value: unknown): RuntimeStatus {
   const raw = value && typeof value === "object" ? (value as { type?: unknown }).type : value;
   if (raw === "notLoaded" || raw === "idle" || raw === "systemError" || raw === "active") return raw;
-  return "idle";
+  return "notLoaded";
 }
 
 export function normalizeActiveFlags(value: unknown): ActiveFlag[] {
-  const record = value && typeof value === "object" ? value as { activeFlags?: unknown; waitingForApproval?: unknown; waitingForUserInput?: unknown } : {};
-  const flags = Array.isArray(record.activeFlags) ? record.activeFlags : [
-    record.waitingForApproval === true ? "waitingOnApproval" : undefined,
-    record.waitingForUserInput === true ? "waitingOnUserInput" : undefined,
-  ];
+  const record = value && typeof value === "object" ? value as { activeFlags?: unknown } : {};
+  const flags = record.activeFlags;
   if (!Array.isArray(flags)) return [];
   return [...new Set(flags.filter((flag): flag is ActiveFlag => flag === "waitingOnApproval" || flag === "waitingOnUserInput"))].slice(0, 2);
 }
@@ -76,15 +71,14 @@ export function normalizeTurn(value: unknown): LatestTurn | undefined {
 }
 
 export function deriveTaskStatus(goal: TaskGoalStatus | undefined, runtime: RuntimeStatus, flags: ActiveFlag[], turn: LatestTurn | undefined): TaskStatus {
-  if (goal) return goal;
-  if (turn?.status === "failed") return "failed";
-  if (turn?.status === "interrupted") return "idle";
-  if (turn?.status === "inProgress" || runtime === "active") {
-    if (flags.includes("waitingOnApproval") || flags.includes("waitingOnUserInput")) return "waiting";
-    return "active";
-  }
   if (runtime === "systemError") return "failed";
-  return turn?.status === "completed" ? "complete" : "idle";
+  if (flags.length) return "needs_action";
+  if (runtime === "active") return "running";
+  if (turn?.status === "failed") return "failed";
+  if (turn?.status === "interrupted") return "needs_action";
+  if (goal && goal !== "running") return goal;
+  if (turn?.status === "inProgress") return "running";
+  return turn?.status === "completed" ? "completed" : "needs_action";
 }
 
 export function normalizeAction(value: unknown): TaskAction | undefined {

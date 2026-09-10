@@ -9,19 +9,19 @@ const directory = await mkdtemp(join(tmpdir(), 'codex-assistant-perf-'));
 let server;
 try {
   server = await createApp({ databasePath: join(directory, 'state.sqlite'), accessToken: token, logger: false });
-  const task = { id: 'perf-thread', title: '性能基准', status: 'active', runtimeStatus: 'active', activeFlags: [], freshness: 'fresh', source: 'thread', plan: [], updatedAt: new Date().toISOString(), changedAt: new Date().toISOString() };
+  const task = { id: 'perf-thread', title: '性能基准', status: 'running', runtimeStatus: 'active', activeFlags: [], freshness: 'fresh', source: 'thread', plan: [], updatedAt: new Date().toISOString(), changedAt: new Date().toISOString() };
   const latencies = [];
   const started = performance.now();
   for (let index = 1; index <= 1000; index += 1) {
     const requestStarted = performance.now();
-    const response = await server.app.inject({ method: 'POST', url: '/codex-assistant/api/v2/events', headers: { authorization: `Bearer ${token}` }, payload: { protocolVersion: 'codex-assistant.v2', deviceId: 'perf-device', localSequence: index, occurredAt: new Date().toISOString(), trace: { traceId: '0123456789abcdef0123456789abcdef', spanId: index.toString(16).padStart(16, '0') }, task: { ...task, updatedAt: new Date(Date.now() + index).toISOString(), changedAt: new Date(Date.now() + index).toISOString() } } });
+    const response = await server.app.inject({ method: 'POST', url: '/codex-assistant/api/v3/events', headers: { authorization: `Bearer ${token}` }, payload: { protocolVersion: 'codex-assistant.v3', deviceId: 'perf-device', localSequence: index, occurredAt: new Date().toISOString(), trace: { traceId: '0123456789abcdef0123456789abcdef', spanId: index.toString(16).padStart(16, '0') }, task: { ...task, updatedAt: new Date(Date.now() + index).toISOString(), changedAt: new Date(Date.now() + index).toISOString() } } });
     // 错误响应不能被当成更快的正常 ingest 混入测量结果。
     if (response.statusCode !== 200 || response.json().sequence !== index) throw new Error('PERF_INGEST_FAILED');
     latencies.push(performance.now() - requestStarted);
   }
   const elapsedMs = performance.now() - started;
   const snapshotStarted = performance.now();
-  const snapshot = await server.app.inject({ method: 'GET', url: '/codex-assistant/api/v2/tasks', headers: { authorization: `Bearer ${token}` } });
+  const snapshot = await server.app.inject({ method: 'GET', url: '/codex-assistant/api/v3/tasks', headers: { authorization: `Bearer ${token}` } });
   const snapshotMs = performance.now() - snapshotStarted;
   if (snapshot.statusCode !== 200 || snapshot.json().cursor !== 1000 || snapshot.json().tasks.length !== 1) throw new Error('PERF_SNAPSHOT_FAILED');
   latencies.sort((left, right) => left - right);

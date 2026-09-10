@@ -48,7 +48,7 @@ class SyncForegroundService : Service() {
                 notices.retain(current.keys)
                 wasConnected = state.connected
                 previous = current
-                val summary = current.values.count { it.status in setOf("active", "waiting", "blocked", "paused") }
+                val summary = current.values.count { it.status == "running" }
                 updateNotification(
                     when {
                         state.connected -> "同步中 · $summary 个进行中任务"
@@ -61,6 +61,13 @@ class SyncForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        // Android 15 ends the data-sync foreground-service allowance.
+        // Stop within the system deadline; reopening the app can resume sync.
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
 
     override fun onDestroy() {
         collectJob?.cancel()
@@ -114,6 +121,8 @@ class SyncForegroundService : Service() {
             .setContentTitle(notice.title)
             .setContentText(notice.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(notice.detail))
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(baseNotification("任务状态：${statusLabel(task.status)}", EVENT_CHANNEL_ID, ongoing = false, autoCancel = true))
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setSilent(notice.silent)

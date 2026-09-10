@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
+import { readFile, appendFile, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -32,17 +32,18 @@ it("releases failed resume and local IPC terminal locks without a cloud control 
     mock.failResume = false;
     await expect(monitor.sendMessage("thread", "retry")).resolves.toEqual({ status: "started" });
     mock.notify?.({ method: "item/completed", params: { threadId: "thread" } });
-    await expect(monitor.sendMessage("thread", "duplicate")).rejects.toThrow("MESSAGE_IN_FLIGHT");
+    await expect(monitor.sendMessage("thread", "duplicate")).resolves.toMatchObject({status: "started"});
     mock.notify?.({ method: "turn/completed", params: { threadId: "thread" } });
     await expect(monitor.sendMessage("thread", "next turn")).resolves.toEqual({ status: "started" });
   } finally { mock.failResume = false; await monitor.stop(); await rm(directory, { recursive: true, force: true }); }
 });
 
-it("maps a concatenated outbox JSON file to the recoverable invalid-queue error", async () => {
+it("preserves a concatenated outbox JSON file and refuses to reset its sequence", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-outbox-corrupt-"));
   try {
     await writeFile(join(directory, "outbox.json"), '{"deviceId":"test-device"}\n{"deviceId":"test-device"}\n');
     await expect(Monitor.create({ stateDirectory: directory, apiUrl: "https://monitor.invalid", token: "test", deviceId: "test-device", onTasks: () => {} })).rejects.toThrow("OUTBOX_INVALID");
+    expect(await readFile(join(directory, "outbox.json"), "utf8")).toBe('{"deviceId":"test-device"}\n{"deviceId":"test-device"}\n');
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -70,34 +71,34 @@ it("reprojects unchanged metadata, expires cached evidence on read failure, and 
     monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://monitor.invalid", token: "test", deviceId: "test-device",
       onTasks: tasks => snapshots.push(tasks[0]), onStatus: status => { if (status === "connected") { nextPoll?.(); nextPoll = undefined; } } });
     await monitor.start();
-    expect(snapshots.at(-1)).toMatchObject({ status: "active", freshness: "fresh" });
+    expect(snapshots.at(-1)).toMatchObject({ status: "running", freshness: "fresh" });
 
     now += ACTIVE_EVIDENCE_MAX_AGE_MS;
     await waitForPoll();
-    expect(snapshots.at(-1)).toMatchObject({ status: "active", freshness: "stale" });
+    expect(snapshots.at(-1)).toMatchObject({ status: "running", freshness: "stale" });
 
     now += IN_PROGRESS_ITEM_MAX_AGE_MS - ACTIVE_EVIDENCE_MAX_AGE_MS;
     await waitForPoll();
-    expect(snapshots.at(-1)).toMatchObject({ status: "idle", freshness: "stale", error: { code: "ACTIVE_EVIDENCE_EXPIRED" } });
+    expect(snapshots.at(-1)).toMatchObject({ status: "needs_action", freshness: "stale", error: { code: "ACTIVE_EVIDENCE_EXPIRED" } });
 
     mock.activeItem = false;
     mock.revision++;
     await appendFile(mock.path, JSON.stringify({ type: "event_msg", timestamp: new Date(now).toISOString(), payload: { type: "token_count" } }) + "\n");
     await utimes(mock.path, now / 1000, now / 1000);
     await waitForPoll();
-    expect(snapshots.at(-1)).toMatchObject({ status: "active", freshness: "fresh" });
+    expect(snapshots.at(-1)).toMatchObject({ status: "running", freshness: "fresh" });
 
     await rename(mock.path, mock.path + ".held");
     now += ACTIVE_EVIDENCE_MAX_AGE_MS;
     await waitForPoll();
-    expect(snapshots.at(-1)).toMatchObject({ status: "idle", freshness: "stale", error: { code: "ACTIVE_EVIDENCE_EXPIRED" } });
+    expect(snapshots.at(-1)).toMatchObject({ status: "needs_action", freshness: "stale", error: { code: "ACTIVE_EVIDENCE_EXPIRED" } });
 
     await rename(mock.path + ".held", mock.path);
     await appendFile(mock.path, event("task_complete"));
     await waitForPoll();
-    expect(snapshots.at(-1)).toMatchObject({ status: "complete", freshness: "fresh" });
+    expect(snapshots.at(-1)).toMatchObject({ status: "completed", freshness: "fresh" });
     expect(mock.reads).toBe(2); // 状态投影按证据时间重算；只有计划修订时重新读取详情。
-    expect(uploaded.map(row => row.task.status)).toEqual(["active", "active", "idle", "active", "idle", "complete"]);
+    expect(uploaded.map(row => row.task.status)).toEqual(["running", "running", "needs_action", "running", "needs_action", "completed"]);
     expect(uploaded.map(row => row.localSequence)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(JSON.stringify(uploaded)).not.toContain("evidenceAt");
   } finally {
@@ -107,3 +108,29 @@ it("reprojects unchanged metadata, expires cached evidence on read failure, and 
     await rm(directory, { recursive: true, force: true });
   }
 }, 20_000);
+
+
+it("waits for an in-flight upload before shutting down and persisting the queue", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-stop-"));
+  let release!: () => void;
+  let entered!: () => void;
+  const enteredUpload = new Promise<void>(resolve => { entered = resolve; });
+  const upload = new Promise<void>(resolve => { release = resolve; });
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.endsWith("/events")) { entered(); await upload; }
+    return { ok: true, status: 200 };
+  }));
+  mock.path = join(directory, "absent.jsonl");
+  const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://monitor.invalid", token: "test", deviceId: "test-device", onTasks() {} });
+  try {
+    const starting = monitor.start();
+    await enteredUpload;
+    let stopped = false;
+    const stopping = monitor.stop().then(() => { stopped = true; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(stopped).toBe(false);
+    release(); await starting; await stopping;
+    expect(JSON.parse(await readFile(join(directory, "outbox.json"), "utf8")).events).toHaveLength(0);
+    await expect(monitor.sendMessage("thread", "after stop")).rejects.toThrow("MONITOR_STOPPED");
+  } finally { release(); await monitor.stop(); vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true }); }
+});

@@ -11,6 +11,11 @@ import {
   ClientSubscribeMessageSchema,
   ClientDetailMessageSchema,
   ClientSendMessageSchema,
+  InteractionRequestSchema,
+  InteractionSubmitMessageSchema,
+  InteractionResultSchema,
+  DetailMessageSchema,
+  ResultMessageSchema,
   IngestEventSchema,
   TraceSpanBatchSchema,
   PROTOCOL_VERSION,
@@ -25,7 +30,7 @@ import {
 } from "@codex-assistant/protocol";
 import { TaskDatabase } from "./database.js";
 
-const API = "/codex-assistant/api/v2";
+const API = "/codex-assistant/api/v3";
 const MAX_REPLAY_EVENTS = 500;
 const TRACE_ID_PATTERN = /^[a-f0-9]{32}$/;
 
@@ -43,7 +48,7 @@ function error(reply: FastifyReply, statusCode: number, code: ErrorCode, message
 
 function decodeJson(input: unknown): unknown | undefined {
   const text = Buffer.isBuffer(input) ? input.toString("utf8") : typeof input === "string" ? input : undefined;
-  if (!text || text.length > 32_768) return undefined;
+  if (!text || Buffer.byteLength(text, "utf8") > 131_072) return undefined;
   try { return JSON.parse(text) as unknown; } catch { return undefined; }
 }
 
@@ -104,7 +109,10 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
   const app = Fastify({ logger: options.logger ?? true, bodyLimit: 128 * 1024 });
   const subscribers = new Set<WebSocket>();
   const desktopControllers = new Set<WebSocket>();
-  const pendingRequests = new Map<string, WebSocket>();
+  const pendingRequests = new Map<string, { target: WebSocket; controller: WebSocket; threadId: string }>();
+  const interactionResults = new Map<string, import("@codex-assistant/protocol").InteractionResult>();
+  const rememberInteractionResult = (result: import("@codex-assistant/protocol").InteractionResult) => { interactionResults.set(result.requestId, result); if (interactionResults.size > 1000) interactionResults.delete(interactionResults.keys().next().value!); };
+  const interactions = new Map<string, { controller: WebSocket; request: import('@codex-assistant/protocol').InteractionRequest; submitted: boolean }>();
   const tracerProvider = new BasicTracerProvider({
     spanProcessors: [new BatchSpanProcessor(new SQLiteSpanExporter(database), { maxQueueSize: 256, maxExportBatchSize: 32, scheduledDelayMillis: 250 })],
   });
@@ -141,11 +149,14 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
     const encoded = JSON.stringify(message);
     for (const socket of subscribers) {
       if (socket.readyState === 1 && socket.bufferedAmount < 256 * 1024) socket.send(encoded);
-      else if (socket.readyState !== 1) subscribers.delete(socket);
+      else {
+        subscribers.delete(socket);
+        if (socket.readyState === 1) socket.close(1013, "Subscriber too slow; reconnect to synchronize");
+      }
     }
   };
 
-  await app.register(websocket, { options: { maxPayload: 32_768, perMessageDeflate: false } });
+  await app.register(websocket, { options: { maxPayload: 131_072, perMessageDeflate: false } });
   app.setErrorHandler((cause, request, reply) => {
     if ((cause as { code?: string }).code === "FST_ERR_CTP_BODY_TOO_LARGE") return error(reply, 413, "validation_failed", "Request body is too large");
     request.log.error({ err: cause }, "codex-assistant request failed");
@@ -164,7 +175,7 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
 
   app.post(`${API}/events`, { preHandler: authenticateHttp }, async (request, reply) => {
     const body = parseStrict<IngestEvent>(IngestEventSchema, request.body);
-    if (!body) return error(reply, 422, "validation_failed", "Request does not match codex-assistant.v2");
+    if (!body) return error(reply, 422, "validation_failed", "Request does not match codex-assistant.v3");
     const startedAt = new Date().toISOString();
     const serverSpan = childTrace(body.trace);
     const result = database.insert(body);
@@ -208,7 +219,7 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
         const auth = parseStrict<import("@codex-assistant/protocol").ClientAuthMessage>(ClientAuthMessageSchema, payload);
         if (!auth) return reject(
           typeof (payload as { protocolVersion?: unknown } | undefined)?.protocolVersion === "string" ? "protocol_unsupported" : "validation_failed",
-          "First message must be codex-assistant.v2 auth",
+          "First message must be codex-assistant.v3 auth",
         );
         if (auth.token !== options.accessToken) return reject("auth_required", "Invalid bearer token");
         authenticated = true;
@@ -218,39 +229,96 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
       }
       if (subscribed) {
         const message = payload as Record<string, unknown> | undefined;
-        if (message?.type === "role" && message.role === "desktop") { desktopControllers.add(socket); return; }
+        if (message?.type === "role" && message.role === "desktop") { if (desktopControllers.size && !desktopControllers.has(socket)) return reject("validation_failed", "Only one workstation controller is supported"); desktopControllers.add(socket); return; }
         if (desktopControllers.has(socket)) {
-          if (message?.type === "detail" || message?.type === "result") {
+          if (message?.type === 'interaction.result') {
+            const result = parseStrict<import('@codex-assistant/protocol').InteractionResult>(InteractionResultSchema, payload);
+            const interaction = result ? interactions.get(result.requestId) : undefined;
+            if (result && !interaction && interactionResults.get(result.requestId)?.threadId === result.threadId) return;
+            if (!result || !interaction || interaction.controller !== socket || interaction.request.threadId !== result.threadId) return reject('validation_failed', 'Interaction result does not match its owner');
+            if (result.status === "failed") interaction.submitted = false;
+            else { interactions.delete(result.requestId); rememberInteractionResult(result); }
+            for (const peer of subscribers) if (peer !== socket && peer.readyState === 1) peer.send(JSON.stringify(result));
+            return;
+          }
+          if (message?.type === "detail" || message?.type === "result" || message?.type === "interaction.request") {
             const requestId = typeof message.requestId === "string" ? message.requestId : undefined;
-            const target = requestId ? pendingRequests.get(requestId) : undefined;
-            if (target?.readyState === 1) target.send(JSON.stringify(message));
-            if (requestId) pendingRequests.delete(requestId);
+            if (message?.type === "interaction.request") {
+              const request = parseStrict<import("@codex-assistant/protocol").InteractionRequest>(InteractionRequestSchema, payload);
+              if (!request || !requestId) return reject("validation_failed", "Interaction request is invalid");
+              const existing = interactions.get(requestId);
+              if (existing && (existing.controller !== socket || existing.request.threadId !== request.threadId)) return reject('validation_failed', 'Duplicate interaction request id');
+              if (existing) return;
+              interactionResults.delete(requestId);
+              interactions.set(requestId, { controller: socket, request, submitted: false });
+              for (const peer of subscribers) if (peer.readyState === 1 && peer !== socket) peer.send(JSON.stringify(request));
+              return;
+            }
+            const response = parseStrict<import('@codex-assistant/protocol').DetailMessage | import('@codex-assistant/protocol').ResultMessage>(message.type === 'detail' ? DetailMessageSchema : ResultMessageSchema, payload);
+            if (!response) return reject('validation_failed', 'Invalid control response');
+            const pending = pendingRequests.get(response.requestId);
+            if (!pending) return;
+            if (pending.controller !== socket || pending.threadId !== response.threadId) return reject('validation_failed', 'Control response does not match its owner');
+            if (pending.target.readyState === 1) pending.target.send(JSON.stringify(response));
+            if (response.type === 'detail' || response.status === 'completed' || response.status === 'failed') pendingRequests.delete(response.requestId);
             return;
           }
           return reject("validation_failed", "Desktop control message is invalid");
         }
         const detail = parseStrict<import("@codex-assistant/protocol").ClientDetailMessage>(ClientDetailMessageSchema, payload);
         const send = parseStrict<import("@codex-assistant/protocol").ClientSendMessage>(ClientSendMessageSchema, payload);
+        const interaction = parseStrict<import("@codex-assistant/protocol").InteractionSubmitMessage>(InteractionSubmitMessageSchema, payload);
+        if (interaction) {
+          const original = interactions.get(interaction.requestId);
+          if (!original) {
+            const prior = interactionResults.get(interaction.requestId);
+            socket.send(JSON.stringify(prior?.threadId === interaction.threadId ? prior : { type: 'interaction.result', protocolVersion: PROTOCOL_VERSION, requestId: interaction.requestId, threadId: interaction.threadId, status: 'expired' }));
+            return;
+          }
+          if (original.request.threadId !== interaction.threadId) return reject('validation_failed', 'Interaction request does not match its thread');
+          if (original.submitted) return;
+          if (original.controller.readyState !== 1) return;
+          original.submitted = true;
+          original.controller.send(JSON.stringify(interaction));
+          return;
+        }
         if (detail || send) {
           const requestId = detail?.requestId ?? send?.requestId;
           const controller = [...desktopControllers].find((peer) => peer.readyState === 1 && peer.bufferedAmount < 256 * 1024);
-          if (!controller || !requestId) return reject("internal_error", "Desktop controller is offline");
-          pendingRequests.set(requestId, socket);
+          const request = detail ?? send!;
+          if (!controller || !requestId) {
+            socket.send(JSON.stringify({ type: 'result', protocolVersion: PROTOCOL_VERSION, requestId: request.requestId, threadId: request.threadId, status: 'failed', error: '工作站未连接' }));
+            return;
+          }
+          if (pendingRequests.has(requestId)) return reject('validation_failed', 'Duplicate control request id');
+          pendingRequests.set(requestId, { target: socket, controller, threadId: request.threadId });
           controller.send(JSON.stringify(payload));
           return;
         }
         return reject("validation_failed", "Unsupported control message");
       }
       const subscribe = parseStrict<import("@codex-assistant/protocol").ClientSubscribeMessage>(ClientSubscribeMessageSchema, payload);
-      if (!subscribe) return reject("validation_failed", "Expected codex-assistant.v2 subscribe message");
+      if (!subscribe) return reject("validation_failed", "Expected codex-assistant.v3 subscribe message");
       subscribed = true;
       subscribers.add(socket);
       const replay = database.eventsAfter(subscribe.after, MAX_REPLAY_EVENTS);
       for (const event of replay) socket.send(JSON.stringify({ type: "event", protocolVersion: PROTOCOL_VERSION, event } satisfies ServerWebSocketMessage));
       socket.send(JSON.stringify({ type: "snapshot", protocolVersion: PROTOCOL_VERSION, cursor: database.cursor(), tasks: database.currentTasks() } satisfies ServerWebSocketMessage));
+      for (const { request } of interactions.values()) socket.send(JSON.stringify(request));
+      for (const result of interactionResults.values()) socket.send(JSON.stringify(result));
       database.recordSpan({ ...childTrace(connectionTrace), name: "websocket.subscribe", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), attributes: { replayCount: String(replay.length) } });
     });
-    socket.on("close", () => { subscribers.delete(socket); desktopControllers.delete(socket); for (const [requestId, target] of pendingRequests) if (target === socket) pendingRequests.delete(requestId); });
+    socket.on("close", () => {
+      subscribers.delete(socket); desktopControllers.delete(socket);
+      for (const [requestId, pending] of pendingRequests) {
+        if (pending.controller === socket && pending.target.readyState === 1) pending.target.send(JSON.stringify({ type: 'result', protocolVersion: PROTOCOL_VERSION, requestId, threadId: pending.threadId, status: 'failed', error: '工作站连接已断开，结果尚未确认；请核实回合记录' }));
+        if (pending.target === socket || pending.controller === socket) pendingRequests.delete(requestId);
+      }
+      for (const [requestId, entry] of interactions) if (entry.controller === socket) {
+        interactions.delete(requestId);
+        for (const peer of subscribers) if (peer.readyState === 1) peer.send(JSON.stringify({ type: 'interaction.result', protocolVersion: PROTOCOL_VERSION, requestId, threadId: entry.request.threadId, status: 'expired', error: '工作站连接已断开' }));
+      }
+    });
     socket.on("error", () => { subscribers.delete(socket); desktopControllers.delete(socket); });
   });
 

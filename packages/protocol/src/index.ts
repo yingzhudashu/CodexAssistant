@@ -1,7 +1,7 @@
 import Type, { type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
 
-export const PROTOCOL_VERSION = "codex-assistant.v2" as const;
+export const PROTOCOL_VERSION = "codex-assistant.v3" as const;
 
 const Strict = <const T extends Parameters<typeof Type.Object>[0]>(properties: T) =>
   Type.Object(properties, { additionalProperties: false });
@@ -34,14 +34,9 @@ export const TraceSpanSchema = Strict({
 export type TraceSpan = Static<typeof TraceSpanSchema>;
 
 export const TaskStatusSchema = Type.Union([
-  Type.Literal("active"),
-  Type.Literal("paused"),
-  Type.Literal("blocked"),
-  Type.Literal("usage_limited"),
-  Type.Literal("budget_limited"),
-  Type.Literal("waiting"),
-  Type.Literal("idle"),
-  Type.Literal("complete"),
+  Type.Literal("running"),
+  Type.Literal("needs_action"),
+  Type.Literal("completed"),
   Type.Literal("failed"),
 ]);
 export type TaskStatus = Static<typeof TaskStatusSchema>;
@@ -111,12 +106,10 @@ export const PlanStepSchema = Strict({
 export type PlanStep = Static<typeof PlanStepSchema>;
 
 export const TaskGoalStatusSchema = Type.Union([
-  Type.Literal("active"),
-  Type.Literal("paused"),
-  Type.Literal("blocked"),
-  Type.Literal("usage_limited"),
-  Type.Literal("budget_limited"),
-  Type.Literal("complete"),
+  Type.Literal("running"),
+  Type.Literal("needs_action"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
 ]);
 export type TaskGoalStatus = Static<typeof TaskGoalStatusSchema>;
 
@@ -231,6 +224,30 @@ export const ClientSendMessageSchema = Strict({
   threadId: Identifier, text: Type.String({ minLength: 1, maxLength: 20_000 }),
 });
 export type ClientSendMessage = Static<typeof ClientSendMessageSchema>;
+export const InteractionOptionSchema = Strict({ id: Identifier, label: SafeText, description: Type.Optional(SafeText) });
+export const InteractionKindSchema = Type.Union([Type.Literal("single_select"), Type.Literal("multi_select"), Type.Literal("confirm"), Type.Literal("text"), Type.Literal("plan_select"), Type.Literal("unsupported")]);
+export const InteractionQuestionSchema = Strict({
+  id: Type.String({ minLength: 1, maxLength: 200 }),
+  header: SafeText,
+  question: SafeText,
+  required: Type.Boolean(),
+  multiple: Type.Boolean(),
+  isSecret: Type.Optional(Type.Boolean()),
+  isOther: Type.Optional(Type.Boolean()),
+  options: Type.Optional(Type.Array(InteractionOptionSchema, { maxItems: 100 })),
+});
+export type InteractionQuestion = Static<typeof InteractionQuestionSchema>;
+export const InteractionRequestSchema = Strict({
+  type: Type.Literal("interaction.request"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier,
+  kind: InteractionKindSchema, title: SafeText, description: Type.Optional(SafeText), options: Type.Optional(Type.Array(InteractionOptionSchema, { maxItems: 100 })),
+  questions: Type.Optional(Type.Array(InteractionQuestionSchema, { maxItems: 100 })),
+  expiresAt: Type.Optional(IsoTimestamp),
+});
+export type InteractionRequest = Static<typeof InteractionRequestSchema>;
+export const InteractionSubmitMessageSchema = Strict({ type: Type.Literal("interaction.submit"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier, value: Type.Unknown() });
+export type InteractionSubmitMessage = Static<typeof InteractionSubmitMessageSchema>;
+export const InteractionResultSchema = Strict({ type: Type.Literal("interaction.result"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier, status: Type.Union([Type.Literal("submitted"), Type.Literal("cancelled"), Type.Literal("expired"), Type.Literal("failed")]), value: Type.Optional(Type.Unknown()), error: Type.Optional(Type.String({ maxLength: 500 })) });
+export type InteractionResult = Static<typeof InteractionResultSchema>;
 export const DetailMessageSchema = Strict({
   type: Type.Literal("detail"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier,
   turns: Type.Array(Type.Unknown(), { maxItems: 50 }), cursor: Type.Optional(Type.String({ maxLength: 500 })),
@@ -243,7 +260,7 @@ export const ResultMessageSchema = Strict({
 });
 export type ResultMessage = Static<typeof ResultMessageSchema>;
 
-export const ClientWebSocketMessageSchema = Type.Union([ClientAuthMessageSchema, ClientSubscribeMessageSchema, ClientDetailMessageSchema, ClientSendMessageSchema]);
+export const ClientWebSocketMessageSchema = Type.Union([ClientAuthMessageSchema, ClientSubscribeMessageSchema, ClientDetailMessageSchema, ClientSendMessageSchema, InteractionSubmitMessageSchema]);
 export type ClientWebSocketMessage = Static<typeof ClientWebSocketMessageSchema>;
 
 export const AuthenticatedMessageSchema = Strict({
@@ -281,6 +298,8 @@ export const ServerWebSocketMessageSchema = Type.Union([
   ErrorMessageSchema,
   DetailMessageSchema,
   ResultMessageSchema,
+  InteractionRequestSchema,
+  InteractionResultSchema,
 ]);
 export type ServerWebSocketMessage = Static<typeof ServerWebSocketMessageSchema>;
 

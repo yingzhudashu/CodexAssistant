@@ -8,6 +8,8 @@ import type { TaskSnapshot } from "@codex-assistant/protocol";
 contextBridge.exposeInMainWorld("codexAssistant", {
   getConnection: () => ipcRenderer.invoke("connection.get") as Promise<{ configured: boolean; apiUrl?: string; deviceId?: string }>,
   saveConnection: (input: { apiUrl: string; token: string }) => ipcRenderer.invoke("connection.save", input),
+  getInteractions: () => ipcRenderer.invoke("interactions.get"),
+  submitInteraction: (input: unknown) => ipcRenderer.invoke("interaction.submit", input),
   getTasks: () => ipcRenderer.invoke("tasks.get") as Promise<TaskSnapshot[]>,
   getSyncStatus: () => ipcRenderer.invoke("sync.status") as Promise<"connecting" | "syncing" | "connected" | "offline">,
   getWorkstationStatus: () => ipcRenderer.invoke("workstation.status") as Promise<{ ready: boolean }>,

@@ -17,8 +17,8 @@ it("allows local sending during cloud sync/offline and preserves a draft while t
     document: { querySelector: () => root, documentElement: { dataset: {} }, activeElement: null, addEventListener: () => {} },
     HTMLInputElement: class {}, HTMLTextAreaElement: class {},
     localStorage: { getItem: () => null }, matchMedia: () => ({ matches: false, addEventListener: () => {} }),
-    window: { codexAssistant: {
-      getConnection: async () => ({ configured: true }), getTasks: async () => [{ id: "task", title: "任务", status: "active", freshness: "fresh", plan: [] }],
+    window: { addEventListener: () => {}, interactionForms: {render: () => "", bind: () => {}}, codexAssistant: {
+      getInteractions: async () => [], getConnection: async () => ({ configured: true }), getTasks: async () => [{ id: "task", title: "任务", status: "running", freshness: "fresh", plan: [] }],
       getSyncStatus: async () => "syncing", getWorkstationStatus: async () => ({ ready }),
       onTasks: () => {}, onSyncStatus: (fn: typeof syncListener) => { syncListener = fn; }, sendTaskMessage: send,
     } },
@@ -44,7 +44,7 @@ it("allows local sending during cloud sync/offline and preserves a draft while t
   expect(runInContext("s.draft.has('task')", context)).toBe(false);
 });
 
-it("keeps Windows and Android task filter names and order identical to the nine-state protocol", async () => {
+it("keeps Windows and Android task filter names and order identical to the four-state protocol", async () => {
   const desktop = await readFile(new URL("../src/renderer/workspace.js", import.meta.url), "utf8");
   const labels = runInContext(`(${desktop.match(/const labels = (.*);/)![1]})`, createContext());
   expect(Object.keys(labels).sort()).toEqual(TaskStatusSchema.anyOf.map(status => status.const).sort());

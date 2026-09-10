@@ -10,6 +10,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonElement
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -34,6 +35,9 @@ data class TaskState(
     val results: Map<String,ResultMessage> = emptyMap(),
     val loadingDetails: Set<String> = emptySet(),
     val detailErrors: Map<String,String> = emptyMap(),
+    val interactions: Map<String,InteractionRequest> = emptyMap(),
+    val interactionResults: Map<String,InteractionResult> = emptyMap(),
+    val submittingInteractions: Set<String> = emptySet(),
 )
 
 /** Android 端只负责协议接收和 reducer，不把网络细节泄漏到 Compose。 */
@@ -63,6 +67,8 @@ class TaskRepository(private val credentials: CredentialStore) {
         return requestId
     }
 
+    fun submitInteraction(requestId: String, threadId: String, value: JsonElement): Boolean = activeSocket?.send(json.encodeToString(InteractionSubmit(requestId = requestId, threadId = threadId, value = value))) == true
+
     fun stream(): Flow<TaskState> = callbackFlow {
         var state = TaskState(cursor = credentials.cursor())
         var socket: WebSocket? = null
@@ -85,7 +91,7 @@ class TaskRepository(private val credentials: CredentialStore) {
                         val spans = traceLogger.pending()
                         if (spans.isEmpty()) break
                         val body = json.encodeToString(TraceSpanBatch(spans = spans)).toRequestBody("application/json".toMediaType())
-                        val request = Request.Builder().url("$base/codex-assistant/api/v2/traces/spans").header("Authorization", "Bearer $token").post(body).build()
+                        val request = Request.Builder().url("$base/codex-assistant/api/v3/traces/spans").header("Authorization", "Bearer $token").post(body).build()
                         val response = try { client.newCall(request).execute() } catch (_: Exception) { break }
                         var uploaded = false
                         response.use {
@@ -119,7 +125,7 @@ class TaskRepository(private val credentials: CredentialStore) {
             val token = credentials.token()
             if (token == null) { state = state.copy(connected = false, connectionStatus = "not_configured", error = "请先配置访问 Token"); trySend(state); return@connect }
             val base = credentials.serverBaseUrl().replaceFirst(Regex("^http"), "ws")
-            val request = Request.Builder().url("$base/codex-assistant/api/v2/stream").build()
+            val request = Request.Builder().url("$base/codex-assistant/api/v3/stream").build()
             val connectionTraceId = traceLogger.newTraceId()
             traceLogger.event("websocket.connect", connectionTraceId)
             scheduleTraceUpload()
@@ -167,7 +173,7 @@ class TaskRepository(private val credentials: CredentialStore) {
                             "snapshot" -> {
                                 val snapshot = json.decodeFromString<SnapshotMessage>(text)
                                 state = traceLogger.span("websocket.snapshot.reducer", connectionTraceId) {
-                                    state.copy(connected = true, connectionStatus = "connected", cursor = snapshot.cursor, tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis())
+                                    state.copy(connected = true, connectionStatus = "connected", interactions = emptyMap(), interactionResults = emptyMap(), cursor = snapshot.cursor, tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis())
                                 }
                                 scheduleTraceUpload()
                                 credentials.saveCursor(state.cursor)
@@ -180,6 +186,16 @@ class TaskRepository(private val credentials: CredentialStore) {
                             }
                             "result" -> {
                                 state = state.copy(result = json.decodeFromString<ResultMessage>(text))
+                                trySend(state)
+                            }
+                            "interaction.request" -> {
+                                val interaction = json.decodeFromString<InteractionRequest>(text)
+                                state = state.copy(interactions = state.interactions + (interaction.requestId to interaction))
+                                trySend(state)
+                            }
+                            "interaction.result" -> {
+                                val result = json.decodeFromString<InteractionResult>(text)
+                                state = state.copy(interactions = if (result.status == "failed") state.interactions else state.interactions - result.requestId, interactionResults = (state.interactionResults + (result.requestId to result)).entries.toList().takeLast(1000).associate { it.toPair() })
                                 trySend(state)
                             }
                             "error" -> {
@@ -200,12 +216,17 @@ class TaskRepository(private val credentials: CredentialStore) {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+                    if (activeSocket === webSocket) activeSocket = null
                     traceLogger.event("websocket.failure", connectionTraceId)
                     scheduleTraceUpload()
                     if (stopped || permanentFailure) return
                     state = state.copy(connected = false, connectionStatus = "offline", error = "网络连接已断开")
                     trySend(state)
                     scheduleReconnect()
+                }
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(code, reason)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {

@@ -1,6 +1,6 @@
 # 安装包与发布
 
-当前 Windows 下载版本为 `2.0.10`，Android 为 `2.0.8`；Android `versionCode=11`，协议固定为 `codex-assistant.v2`。本次修复 Android 二级页导航和返回、统一两端九种状态筛选、分离 Windows 本机就绪与云端同步状态，并改用 ICO 托盘资源。服务端协议与数据库无需变更。
+当前源码 Windows 版本为 `2.0.12`，Android 为 `2.0.10`；Android `versionCode=13`，协议固定为 `codex-assistant.v3`。本次修复 Android 二级页导航和返回、统一两端四种状态筛选、分离 Windows 本机就绪与云端同步状态，并改用 ICO 托盘资源。本轮协议升级v3、数据库schema=6，需要部署全新数据库；不迁移旧状态。
 
 ## 构建
 
@@ -29,21 +29,19 @@ Android 回归命令：在 `android` 目录运行 `.\gradlew.bat :app:testDebugU
 
 两个构建脚本生成的本地 manifest.json 只是各平台构建信息，不是线上联合清单，不能直接覆盖服务器清单。Windows 本地产物名为 `CodexAssistant Setup <版本>.exe`，上传时按线上约定命名为 `CodexAssistant-<版本>.exe`；哈希针对实际上传字节计算。只发布一个平台时，从现有线上清单保留另一个平台的全部信息。
 
-Windows 当前仅比较顶层 version 字符串是否与已安装版本不同，没有实现语义版本高低比较；Android 按 versionCode 判断是否更新。桌面没有 Android 同等的清单结构和大小校验。下载交给浏览器，两端都不会自动验证所下载文件的 SHA-256；发布端的完整下载校验不能省略。
+Windows 使用 semver 比较顶层 version，仅提示更高的有效版本；Android 按 versionCode 判断是否更新。桌面没有 Android 同等的清单结构和大小校验。下载交给浏览器，两端都不会自动验证所下载文件的 SHA-256；发布端的完整下载校验不能省略。
 
 ## 服务端与回滚
 
 客户端修复若未改变协议或 schema，不需要删除服务端数据。服务端通过 `scripts/deploy-production.ps1` 发布独立 release 并检查 health。回滚只切换已验证的 release；schema 不同直接拒绝，不执行 migration。安装包、APK、签名材料和测试截图均不提交到版本库。
 
-当前部署脚本只在记录上一 current 目标后才能自动切回。较早阶段失败时可能移除 current 并停止服务；脚本不会备份恢复 systemd unit 或 Nginx snippet，Nginx 主配置也仅在新增 include 时备份。配置变更前需人工备份上述文件并准备恢复命令，不能依赖脚本完成完整回滚。成功部署保留最近五份服务 release；此策略不清理下载目录中的安装包。
+部署脚本在修改前记录 current 并备份 systemd unit、Nginx snippet 和主配置到 /var/backups/codex-assistant/<release-id>。schema 不匹配时停止服务，将原数据库及 WAL/SHM 保存到该备份目录后创建干净状态。失败时恢复配置、旧状态及 current，再重启旧服务；失败的新状态单独保留，不覆盖旧库。成功后保留恢复备份。回滚是发布故障恢复，不是协议兼容或 migration。
 
 确认安装包已发布后，可用 `npm run clean -- -WhatIf` 查看本地清理范围，再运行 `npm run clean` 删除生成物。源码、版本声明和文档变更提交 Git，二进制包不提交。
 
 
 ## 2026-09-10 修复验收
 
-本轮先修订前端规格及架构/协议表示合同，再实现客户端修复。Windows 2.0.10、Android 2.0.8（versionCode 11）已构建。npm回归19项、Android单元测试7项通过；TypeScript/Android编译及release构建通过。设计文档13页、29交互、57幅SVG静态复核无问题。
+本轮设计修订和实现验收的最新证据见 [验收记录](acceptance.zh-CN.md)。历史安装包和旧测试计数不作为本轮通过依据。
 
-Electron smoke确认云端syncing时本机发送可用、未就绪时草稿保留；未向真实任务发送测试消息。安装包内ICO字节与源码一致，Electron解码非空。APK内版本与清单一致，v2签名验证通过；Windows仍为NotSigned。物理Android设备返回键/输入法行为、Windows安装后托盘显示及真实任务发送未作端到端验收。
-
-本轮不新增公网接口或数据库字段，服务器无需重新部署客户端IPC改动；发布仅更新CodexAssistant独立下载区。公网完整下载校验记录位于本地artifacts/verification/publication-check.json；图稿和源码静态复核记录位于docs/frontend-design/validation.json。
+2026-09-10 已部署生产 release `20260910114414-a577603b9635`，并发布 Windows 2.0.12 与 Android 2.0.10（versionCode=13）及联合清单。旧数据库与旧下载清单保存在 `/var/backups/codex-assistant/20260910114414-a577603b9635`。线上检查与保留限制以 [验收记录](acceptance.zh-CN.md) 为准。Electron 更新为 44.3.0，ws 为 8.21.3。

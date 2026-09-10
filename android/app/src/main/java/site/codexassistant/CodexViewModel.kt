@@ -14,7 +14,7 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
     private val detailRequests = mutableMapOf<String, Pair<String, Boolean>>()
     init { viewModelScope.launch { coordinator.state().collect { incoming ->
         val old = _state.value
-        var next = incoming.copy(details=old.details, sending=old.sending, results=old.results, loadingDetails=old.loadingDetails, detailErrors=old.detailErrors)
+        var next = incoming.copy(details=old.details, sending=old.sending, results=old.results, loadingDetails=old.loadingDetails, detailErrors=old.detailErrors, submittingInteractions=old.submittingInteractions - incoming.interactionResults.filter { (id, result) -> old.interactionResults[id] !== result }.keys)
         incoming.details.forEach { (thread, detail) ->
             val pending=detailRequests[thread]
             if(pending?.first==detail.requestId) {
@@ -53,11 +53,24 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
         }catch(e:Exception){_state.value=_state.value.copy(detailErrors=_state.value.detailErrors+(threadId to (e.message?:"读取失败")))}
     }
     fun send(threadId:String,text:String) {
-        if(threadId in _state.value.sending || !_state.value.connected) return
+        if(!_state.value.connected) return
         try {
             val id=coordinator.sendMessage(threadId,text)
             _state.value=_state.value.copy(sending=_state.value.sending+(threadId to id),results=_state.value.results-threadId)
             viewModelScope.launch { delay(120000);if(_state.value.sending[threadId]==id){_state.value=_state.value.copy(sending=_state.value.sending-threadId,results=_state.value.results+(threadId to ResultMessage("result",PROTOCOL_VERSION,id,threadId,"failed",error="结果尚未确认，请先读取回合摘要核实。消息不会自动重发。")))} }
         }catch(e:Exception){_state.value=_state.value.copy(results=_state.value.results+(threadId to ResultMessage("result",PROTOCOL_VERSION,"",threadId,"failed",error=e.message?:"发送失败")))}
+    }
+    fun submitInteraction(request: InteractionRequest, value: JsonElement) {
+        if (!_state.value.connected || request.requestId in _state.value.submittingInteractions) return
+        if (coordinator.submitInteraction(request.requestId, request.threadId, value)) {
+            _state.value = _state.value.copy(submittingInteractions = _state.value.submittingInteractions + request.requestId)
+            viewModelScope.launch {
+                delay(30000)
+                if (request.requestId in _state.value.submittingInteractions) {
+                    _state.value = _state.value.copy(submittingInteractions = _state.value.submittingInteractions - request.requestId,
+                        interactionResults = _state.value.interactionResults + (request.requestId to InteractionResult("interaction.result", PROTOCOL_VERSION, request.requestId, request.threadId, "failed", error="结果尚未确认。重试使用同一请求标识，不会重复执行。")))
+                }
+            }
+        } else _state.value = _state.value.copy(interactionResults = _state.value.interactionResults + (request.requestId to InteractionResult("interaction.result", PROTOCOL_VERSION, request.requestId, request.threadId, "failed", error="连接不可用，请重连后重试")))
     }
 }
