@@ -1091,3 +1091,7 @@ Android：最低API26；前台同步服务仅一条常驻低重要性通知；�
 所有相对源码路径相对于当前项目根目录。渲染命令：`python docs/frontend-design/render.py`。静态复核命令：`python docs/frontend-design/validate.py`（Python 3、playwright、Pillow，以及本机Microsoft Edge）。渲染只写当前项目的设计文档和 final 图稿；不会写产品源码或请求外部接口。源码 SHA-256 与 HEAD 记录在 source-baseline.json，包含本次审查时的工作区内容，不等同于只读已提交版本。
 
 设计方法参考：[imagegen-frontend-mobile](https://github.com/diuzhev26-glitch/imagegen-frontend-mobile)。采用其平台原生、可读性、连续屏幕一致性要求；本交付为精确 SVG 线框/结构图，未调用外部绘图服务。
+
+## 2026-09-10 IME 最终验收
+
+桌面与 Android 会话页由单一会话容器消费 IME Insets，输入框与键盘顶部间距目标 8dp。附件、消息输入和发送控件在窄屏按统一行列对齐，禁止重复底部留白。

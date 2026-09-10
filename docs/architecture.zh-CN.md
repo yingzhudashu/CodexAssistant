@@ -46,3 +46,7 @@ Fastify 服务端只拥有 CodexAssistant 自己的 SQLite 文件。事件以 `(
 Android 使用进程内 SyncCoordinator 统一入口；Compose 订阅 StateFlow，前台服务维护生命周期并生成通知。当前连接状态和重试计数来自 TaskRepository，首次 snapshot 前不显示已连接。快速重配、慢消费者和多设备任务 ID 冲突仍需要专门压力验收，不能仅凭模块划分承诺所有竞态已消除。
 
 服务端按设备与任务的复合键保存数据，但 Android reducer 与通知使用 task.id 去重，尚不能保证多个采集设备报告同一任务 ID 时的正确合并。客户端连接状态也不是业务状态：桌面上传失败后保留 outbox 并退避，但当前轮询仍可能结束为 connected；以服务端和手机收到的快照确认上传结果。
+
+## 2026-09-10 IME 实现约束
+
+Android 仅允许外层会话详情消费 IME Insets，子控件不得重复 padding；协议和发送语义保持不变。
