@@ -56,6 +56,14 @@ Android 当前版本由 `android/app/build.gradle.kts` 的 `versionName` 与 `ve
 
 Windows 连接保存在 Electron userData 下的 connection.json，待上传事件位于 state/outbox.json。当前启动逻辑在 OUTBOX_INVALID 时停止同步并保留原文件，不自动删除重建；需要人工核实并恢复同一设备的有效备份。服务端以设备 ID 与本地序号幂等，序号重置会命中已有记录，因此禁止删除 outbox 后以原设备 ID 从 1 重新上传。凭据格式不正确时，重新保存配置也会删除旧连接文件再生成当前格式，不存在字段迁移。
 
+### Windows 从 v2 升级后的本地同步状态
+
+安装新版只替换程序，不会自动删除 Electron userData 中的旧队列。若 `state/outbox.json` 中仍有 v2 事件，新版严格校验将抛出 `OUTBOX_INVALID`，启动显示离线，保存连接时也会因重新启动同步而报同一错误。此时不能把重新输入 Token 当作修复方法。
+
+确认队列属于旧协议后，退出 CodexAssistant，将 `connection.json` 与整个 `state` 目录备份到 userData 下独立恢复目录；保留有效连接的地址和加密 Token，给连接生成新的随机 deviceId，移开旧 state 后重启。新版从空队列重新采集当前 Codex 会话，不导入旧事件或旧指纹，不迁移旧协议；新的设备标识避免序号从 1 开始与服务端已接收事件冲突。该步骤是明确的破坏性协议升级操作，不能实现成任意 `OUTBOX_INVALID` 时静默重置的 fallback。文件损坏、未知格式或当前 v3 队列仍按上节保留并恢复有效备份。
+
+恢复后核对新队列只含 v3、新 deviceId 与连接一致、待上传事件排空，并检查公网 health 的任务数和订阅连接；不能只看保存连接不报错。备份仅留本机，不写入仓库或日志。
+
 Android 在 Keystore 数据损坏时清除不可恢复 Token 和 cursor，让用户重新配置。Token 长度至少 16 个字符；粘贴后确认没有前后空白或缺失字符。恢复连接后先接收快照再启用变化通知。
 
 ## 服务端环境变量
