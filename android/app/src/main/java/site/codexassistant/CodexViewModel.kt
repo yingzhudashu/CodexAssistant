@@ -37,6 +37,15 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
                 next=next.copy(loadingDetails=next.loadingDetails-result.threadId,detailErrors=next.detailErrors+(result.threadId to (result.error?:"工作站未连接")))
             }
         }
+        if (old.connected && !incoming.connected) {
+            val interrupted = old.sending.mapValues { (thread, id) ->
+                ResultMessage("result", PROTOCOL_VERSION, id, thread, "failed", error="连接中断，结果尚未确认，请读取回合摘要核实。消息不会自动重发。")
+            }
+            next = next.copy(sending=emptyMap(), results=next.results+interrupted,
+                loadingDetails=emptySet(), detailErrors=next.detailErrors+old.loadingDetails.associateWith { "连接中断，请重新读取" },
+                submittingInteractions=emptySet())
+            detailRequests.clear()
+        }
         _state.value=next
     } } }
     fun closeDetail(threadId:String) {

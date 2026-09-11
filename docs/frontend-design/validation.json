@@ -5,7 +5,7 @@
   "figures": 57,
   "issues": [],
   "image_load": "passed",
-  "validation_date": "2026-09-11",
+  "validation_date": "2026-09-12",
   "tool": "Microsoft Edge headless; Python Playwright; XML parser",
   "semantic_checks": [
     "source path existence and SHA-256 baseline",

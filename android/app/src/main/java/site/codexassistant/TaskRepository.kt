@@ -1,5 +1,7 @@
 package site.codexassistant
 
+import android.os.SystemClock
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -7,19 +9,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.JsonElement
-import okhttp3.OkHttpClient
-import okhttp3.Request
+import kotlinx.serialization.json.*
+import okhttp3.*
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 
 data class TaskState(
+    val networkAvailable: Boolean? = null,
+    val backgroundSyncStatus: String = "stopped",
     val connected: Boolean = false,
     val connectionStatus: String = "connecting",
     val cursor: Long = 0,
@@ -40,107 +38,134 @@ data class TaskState(
     val submittingInteractions: Set<String> = emptySet(),
 )
 
-/** Android 端只负责协议接收和 reducer，不把网络细节泄漏到 Compose。 */
-class TaskRepository(private val credentials: CredentialStore) {
-    @Volatile private var activeSocket: WebSocket? = null
-    // 协议消息的 type、protocolVersion 等字段有默认值，但它们仍是线上的必填字段。
-    // kotlinx.serialization 默认会省略默认值；必须开启 encodeDefaults，否则服务端会把
-    // 首条认证消息看成没有协议版本的非法消息。
+/** One serialized connection lifecycle. Network and Activity signals come from SyncCoordinator. */
+class TaskRepository internal constructor(
+    private val token: () -> String?,
+    private val baseUrl: () -> String,
+    private val saveCursor: (Long) -> Unit,
+    private val initialState: TaskState,
+    private val elapsed: () -> Long = SystemClock::elapsedRealtime,
+    private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS).pingInterval(30, TimeUnit.SECONDS).build(),
+    private val traceLogger: TraceLogger = TraceLogger(),
+    private val sockets: WebSocket.Factory = client,
+) {
+    constructor(credentials: CredentialStore, initial: TaskState) : this(
+        credentials::token, credentials::serverBaseUrl, credentials::saveCursor, initial)
+
+    private val lock = Any()
+    private var activeSocket: WebSocket? = null
+    private var recovery: ((Boolean, Boolean, Boolean) -> Unit)? = null
+    private var shutdown: (() -> Unit)? = null
+    private var available = initialState.networkAvailable == true
+    private var closed = false
     private val json = wireJson
-    private val traceLogger = TraceLogger()
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .pingInterval(30, TimeUnit.SECONDS)
-        .build()
+    private val traceClient = client.newBuilder().callTimeout(15, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
 
-    fun requestDetail(threadId: String, cursor: String? = null): String {
-        val requestId = java.util.UUID.randomUUID().toString()
-        check(activeSocket?.send(json.encodeToString(ClientDetailMessage(requestId = requestId, threadId = threadId, cursor = cursor))) == true) { "连接不可用" }
-        return requestId
+    fun recover(networkAvailable: Boolean, foreground: Boolean = false, networkChanged: Boolean = false) = synchronized(lock) {
+        available = networkAvailable
+        recovery?.invoke(networkAvailable, foreground, networkChanged)
     }
-
+    fun stop() = synchronized(lock) { closed = true; shutdown?.invoke() }
+    private fun send(payload: String): Boolean = synchronized(lock) { !closed && activeSocket?.send(payload) == true }
+    fun requestDetail(threadId: String, cursor: String? = null): String {
+        val id = java.util.UUID.randomUUID().toString()
+        check(send(json.encodeToString(ClientDetailMessage(requestId=id, threadId=threadId, cursor=cursor)))) { "连接不可用" }
+        return id
+    }
     fun sendMessage(threadId: String, text: String): String {
         require(text.trim().length in 1..20000) { "MESSAGE_INVALID" }
-        val requestId = java.util.UUID.randomUUID().toString()
-        check(activeSocket?.send(json.encodeToString(ClientSendMessage(requestId = requestId, threadId = threadId, text = text.trim()))) == true) { "连接不可用" }
-        return requestId
+        val id = java.util.UUID.randomUUID().toString()
+        check(send(json.encodeToString(ClientSendMessage(requestId=id, threadId=threadId, text=text.trim())))) { "连接不可用" }
+        return id
     }
-
-    fun submitInteraction(requestId: String, threadId: String, value: JsonElement): Boolean = activeSocket?.send(json.encodeToString(InteractionSubmit(requestId = requestId, threadId = threadId, value = value))) == true
+    fun submitInteraction(requestId: String, threadId: String, value: JsonElement): Boolean =
+        send(json.encodeToString(InteractionSubmit(requestId=requestId, threadId=threadId, value=value)))
 
     fun stream(): Flow<TaskState> = callbackFlow {
-        var state = TaskState(cursor = credentials.cursor())
+        var state = initialState.copy(connected=false, result=null, details=emptyMap())
         var socket: WebSocket? = null
-        var reconnectAttempt = 0
-        var stopped = false
+        var generation = 0L
+        var retryAttempt = 0
+        var retryJob: Job? = null
+        var deadlineJob: Job? = null
+        var deadline = 0L
         var permanentFailure = false
-        var reconnectScheduled = false
         var traceUploadRunning = false
         lateinit var connect: () -> Unit
-        lateinit var scheduleReconnect: () -> Unit
 
+        fun invalidate() {
+            generation++
+            activeSocket = null
+            deadlineJob?.cancel(); deadlineJob = null
+            socket?.cancel(); socket = null
+        }
+        fun publish() { trySend(state) }
         fun scheduleTraceUpload() {
-            if (traceUploadRunning) return
+            if (traceUploadRunning || closed) return
             traceUploadRunning = true
             launch(Dispatchers.IO) {
                 try {
-                    val token = credentials.token() ?: return@launch
-                    val base = credentials.serverBaseUrl()
-                    while (true) {
-                        val spans = traceLogger.pending()
-                        if (spans.isEmpty()) break
-                        val body = json.encodeToString(TraceSpanBatch(spans = spans)).toRequestBody("application/json".toMediaType())
-                        val request = Request.Builder().url("$base/codex-assistant/api/v3/traces/spans").header("Authorization", "Bearer $token").post(body).build()
-                        val response = try { client.newCall(request).execute() } catch (_: Exception) { break }
-                        var uploaded = false
-                        response.use {
-                            if (it.isSuccessful) {
-                                traceLogger.acknowledge(spans.map { span -> span.spanId }.toSet())
-                                uploaded = true
-                            }
-                        }
-                        if (!uploaded) break
-                    }
-                } finally {
-                    traceUploadRunning = false
-                }
+                    val accessToken = token() ?: return@launch
+                    val spans = traceLogger.pending()
+                    if (spans.isEmpty()) return@launch
+                    val body = json.encodeToString(TraceSpanBatch(spans=spans)).toRequestBody("application/json".toMediaType())
+                    val request = Request.Builder().url("${baseUrl()}/codex-assistant/api/v3/traces/spans")
+                        .header("Authorization", "Bearer $accessToken").post(body).build()
+                    try { traceClient.newCall(request).execute().use { if(it.isSuccessful) traceLogger.acknowledge(spans.map { span -> span.spanId }.toSet()) } } catch (_: java.io.IOException) { }
+                } finally { synchronized(lock) { traceUploadRunning = false } }
             }
         }
-
-        scheduleReconnect = schedule@{
-            if (stopped || permanentFailure || reconnectScheduled) return@schedule
-            reconnectScheduled = true
-            val retryAt = System.currentTimeMillis() + (reconnectAttempt.coerceAtMost(5) + 1) * 1_000L
-            state = state.copy(connected = false, connectionStatus = "reconnecting", retryAttempt = reconnectAttempt + 1, retryAtEpochMs = retryAt)
-            trySend(state)
-            launch {
-                delay((reconnectAttempt.coerceAtMost(5) + 1) * 1_000L)
-                reconnectAttempt++
-                reconnectScheduled = false
-                if (!stopped) connect()
+        fun disconnected(reason: String) {
+            invalidate()
+            state = state.copy(connected=false, result=null, connectionStatus=if(available) "reconnecting" else "offline",
+                error=reason, networkAvailable=available, retryAtEpochMs=null)
+            retryJob?.cancel(); retryJob = null
+            if (available && !permanentFailure && !closed) {
+                val wait = (++retryAttempt).coerceAtMost(6) * 1000L
+                val attemptGeneration = generation
+                state = state.copy(retryAttempt=retryAttempt, retryAtEpochMs=System.currentTimeMillis()+wait)
+                retryJob = launch {
+                    delay(wait)
+                    synchronized(lock) { if(!closed && attemptGeneration==generation && available && !permanentFailure) { retryJob=null; connect() } }
+                }
+            }
+            publish()
+        }
+        fun armDeadline(at: Long) {
+            deadlineJob?.cancel(); deadline=at
+            val attemptGeneration=generation
+            deadlineJob=launch {
+                delay((at-elapsed()).coerceAtLeast(0))
+                synchronized(lock) { if(!closed && generation==attemptGeneration && !state.connected && !permanentFailure) disconnected("连接握手超时，正在恢复") }
             }
         }
         connect = connect@{
-            val token = credentials.token()
-            if (token == null) { state = state.copy(connected = false, connectionStatus = "not_configured", error = "请先配置访问 Token"); trySend(state); return@connect }
-            val base = credentials.serverBaseUrl().replaceFirst(Regex("^http"), "ws")
-            val request = Request.Builder().url("$base/codex-assistant/api/v3/stream").build()
-            val connectionTraceId = traceLogger.newTraceId()
-            traceLogger.event("websocket.connect", connectionTraceId)
-            scheduleTraceUpload()
-            socket = client.newWebSocket(request, object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-                    activeSocket = webSocket
-                    reconnectAttempt = 0
-                    traceLogger.event("websocket.open", connectionTraceId)
-                    scheduleTraceUpload()
-                    state = state.copy(connected = false, connectionStatus = "authenticating", error = null, retryAttempt = 0, retryAtEpochMs = null)
-                    trySend(state)
-                    webSocket.send(json.encodeToString(ClientAuthMessage(token = token)))
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
+            if(closed || permanentFailure) return@connect
+            retryJob?.cancel(); retryJob=null
+            invalidate()
+            if(!available) { state=state.copy(connected=false, result=null, networkAvailable=false, connectionStatus="offline", error="等待网络恢复", retryAtEpochMs=null);publish();return@connect }
+            val accessToken=token()
+            if(accessToken==null) { permanentFailure=true;state=state.copy(connected=false,connectionStatus="not_configured",error="请先配置访问 Token",retryAtEpochMs=null);publish();return@connect }
+            val attemptGeneration=generation
+            val connectionTraceId=traceLogger.newTraceId()
+            traceLogger.event("websocket.connect",connectionTraceId)
+            state=state.copy(connected=false,result=null,networkAvailable=true,connectionStatus="connecting",error=null,retryAtEpochMs=null)
+            publish()
+            armDeadline(elapsed()+25_000)
+            val request=Request.Builder().url(baseUrl().replaceFirst(Regex("^http"),"ws")+"/codex-assistant/api/v3/stream").build()
+            socket=sockets.newWebSocket(request,object:WebSocketListener() {
+                fun valid(ws:WebSocket)=!closed && generation==attemptGeneration && socket===ws
+                override fun onOpen(webSocket:WebSocket,response:Response) { synchronized(lock) {
+                    if(!valid(webSocket)) return@synchronized
+                    armDeadline(minOf(deadline,elapsed()+15_000))
+                    state=state.copy(connectionStatus="authenticating",error=null)
+                    publish()
+                    traceLogger.event("websocket.open",connectionTraceId)
+                    if(!webSocket.send(json.encodeToString(ClientAuthMessage(token=accessToken)))) disconnected("认证发送失败")
+                } }
+                override fun onMessage(webSocket:WebSocket,text:String) { synchronized(lock) {
+                    if(!valid(webSocket) || permanentFailure) return@synchronized
                     try {
                         val messageObject = json.parseToJsonElement(text).jsonObject
                         val messageType = messageObject["type"]?.jsonPrimitive?.content
@@ -149,11 +174,12 @@ class TaskRepository(private val credentials: CredentialStore) {
                             permanentFailure = true
                             state = state.copy(connected = false, connectionStatus = "protocol_error", error = "协议版本不受支持", retryAtEpochMs = null)
                             trySend(state)
-                            webSocket.close(1002, "protocol version")
-                            return
+                            invalidate()
+                            return@synchronized
                         }
                         when (messageType) {
                             "authenticated" -> {
+                                check(state.connectionStatus == "authenticating")
                                 traceLogger.event("websocket.authenticated", connectionTraceId)
                                 scheduleTraceUpload()
                                 state = state.copy(connectionStatus = "subscribing", error = null)
@@ -165,18 +191,21 @@ class TaskRepository(private val credentials: CredentialStore) {
                             "event" -> {
                                 val event = traceLogger.span("websocket.event.decode", connectionTraceId) { json.decodeFromString<EventMessage>(text).event }
                                 scheduleTraceUpload()
-                                if (event.sequence <= state.cursor) return
+                                if (event.sequence <= state.cursor) return@synchronized
                                 state = state.copy(cursor = event.sequence, tasks = upsert(state.tasks, event.task), error = null, lastConnectedAtEpochMs = System.currentTimeMillis(), lastTraceId = event.trace.traceId)
-                                credentials.saveCursor(state.cursor)
+                                saveCursor(state.cursor)
                                 trySend(state)
                             }
                             "snapshot" -> {
+                                check(state.connectionStatus == "subscribing")
+                                deadlineJob?.cancel(); deadlineJob = null; retryAttempt = 0
+                                activeSocket = webSocket
                                 val snapshot = json.decodeFromString<SnapshotMessage>(text)
                                 state = traceLogger.span("websocket.snapshot.reducer", connectionTraceId) {
-                                    state.copy(connected = true, connectionStatus = "connected", interactions = emptyMap(), interactionResults = emptyMap(), cursor = snapshot.cursor, tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis())
+                                    state.copy(connected = true, connectionStatus = "connected", retryAttempt = 0, retryAtEpochMs = null, interactions = emptyMap(), interactionResults = emptyMap(), cursor = snapshot.cursor, tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis())
                                 }
                                 scheduleTraceUpload()
-                                credentials.saveCursor(state.cursor)
+                                saveCursor(state.cursor)
                                 trySend(state)
                             }
                             "detail" -> {
@@ -200,10 +229,10 @@ class TaskRepository(private val credentials: CredentialStore) {
                             }
                             "error" -> {
                                 val message = json.decodeFromString<ErrorMessage>(text)
-                                permanentFailure = message.code == "auth_required" || message.code == "protocol_unsupported" || message.code == "validation_failed"
+                                permanentFailure = true
                                 state = state.copy(connected = false, connectionStatus = if (message.code == "auth_required") "auth_failed" else "protocol_error", error = message.message, retryAtEpochMs = null)
                                 trySend(state)
-                                webSocket.close(1008, "protocol error")
+                                invalidate()
                             }
                             else -> throw IllegalArgumentException("未知协议消息")
                         }
@@ -211,46 +240,43 @@ class TaskRepository(private val credentials: CredentialStore) {
                         permanentFailure = true
                         state = state.copy(connected = false, connectionStatus = "protocol_error", error = error.message ?: "协议错误", retryAtEpochMs = null)
                         trySend(state)
-                        webSocket.close(1008, "protocol error")
+                        invalidate()
                     }
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
-                    if (activeSocket === webSocket) activeSocket = null
-                    traceLogger.event("websocket.failure", connectionTraceId)
-                    scheduleTraceUpload()
-                    if (stopped || permanentFailure) return
-                    state = state.copy(connected = false, connectionStatus = "offline", error = "网络连接已断开")
-                    trySend(state)
-                    scheduleReconnect()
-                }
-
-                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    webSocket.close(code, reason)
-                }
-
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    if (activeSocket === webSocket) activeSocket = null
-                    traceLogger.event("websocket.closed", connectionTraceId)
-                    scheduleTraceUpload()
-                    if (stopped || permanentFailure) return
-                    state = state.copy(connected = false, connectionStatus = "reconnecting")
-                    trySend(state)
-                    scheduleReconnect()
-                }
+                } }
+                override fun onFailure(webSocket:WebSocket,t:Throwable,response:Response?) { synchronized(lock) {
+                    if(!valid(webSocket) || permanentFailure) return@synchronized
+                    if(response?.code==401 || response?.code==403) {
+                        permanentFailure=true;invalidate();state=state.copy(connected=false,connectionStatus="auth_failed",error="认证失败，请编辑连接",retryAtEpochMs=null);publish()
+                    } else disconnected("网络连接已断开")
+                } }
+                override fun onClosing(webSocket:WebSocket,code:Int,reason:String) { synchronized(lock) {
+                    if(valid(webSocket) && !permanentFailure) disconnected("服务连接已关闭，正在恢复")
+                } }
+                override fun onClosed(webSocket:WebSocket,code:Int,reason:String) { synchronized(lock) {
+                    if(valid(webSocket) && !permanentFailure) disconnected("服务连接已关闭，正在恢复")
+                } }
             })
         }
-        connect()
-        awaitClose {
-            stopped = true
-            activeSocket = null
-            socket?.close(1000, "leaving")
-            client.connectionPool.evictAll()
-            client.dispatcher.cancelAll()
-            client.dispatcher.executorService.shutdown()
+        synchronized(lock) {
+            check(shutdown==null) { "Repository already collected" }
+            shutdown={
+                invalidate();retryJob?.cancel();retryJob=null;recovery=null
+                client.dispatcher.cancelAll();client.connectionPool.evictAll()
+                client.dispatcher.executorService.shutdown()
+            }
+            recovery={ network,foreground,networkChanged ->
+                val changed=state.networkAvailable!=network
+                state=state.copy(networkAvailable=network)
+                if(!permanentFailure && !closed) {
+                    if(!network) disconnected("等待网络恢复")
+                    else if(changed || networkChanged || foreground && (state.connected || socket==null || elapsed()>=deadline)) connect()
+                }
+                publish()
+            }
+            if(!closed) connect()
         }
+        awaitClose { synchronized(lock) { closed=true;shutdown?.invoke();shutdown=null } }
     }
-
-    private fun upsert(tasks: List<TaskSnapshot>, next: TaskSnapshot): List<TaskSnapshot> =
-        (tasks.filterNot { it.id == next.id } + next).sortedByDescending { it.updatedAt }
+    private fun upsert(tasks:List<TaskSnapshot>,next:TaskSnapshot):List<TaskSnapshot> =
+        (tasks.filterNot { it.id==next.id }+next).sortedByDescending { it.updatedAt }
 }

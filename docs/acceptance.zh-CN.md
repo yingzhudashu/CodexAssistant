@@ -1,5 +1,15 @@
 # CodexAssistant 升级验收记录
 
+## Android 后台网络恢复
+
+本轮完成 Android 连接恢复实现；发布候选为 Android 2.0.12（versionCode 15）。详细场景与通过条件见 [网络恢复设计](android-network-recovery.zh-CN.md)，文档审查见 [审查记录](frontend-design/review.md)。Windows、服务端、协议和 SQLite schema 未改变。
+
+实现定义唯一连接、前台/网络唤醒、25秒总握手与15秒认证订阅期限、1至6秒退避、旧连接失效、缓存草稿保留及停止服务竞态。前后端协议无需升级；不自动重发未知结果的写操作。用户已确认的无真机限制仍保留。
+
+以下为历史实现与发布验收记录。
+
+本轮验证结果：13份 Markdown、协议契约通过；渲染13页/29交互/57图，结构检查0问题；Android 单元测试、Debug 构建和 lint 通过。专用 API 36 模拟器连续前后台切换20次均恢复（1.1-1.4秒）、断网恢复3次均完成（4.3-4.7秒，含 Wi-Fi 关联）、服务端主动关闭后1.08秒恢复；最终30次连接/30次快照/1个活动连接/0次意外业务写入。
+
 验收日期：2026-09-10。功能验收候选版本为 Windows 2.0.11、Android 2.0.9（versionCode 12）；最终发布版本为 Windows 2.0.12、Android 2.0.10（versionCode 13）。最终版本仅递增发布元数据，以避免覆盖线上已存在的同名不可变安装包；两端已重新构建，Android 签名验证及最终 43 项 Node 回归通过。唯一协议为 `codex-assistant.v3`，API 前缀为 `/codex-assistant/api/v3`，SQLite schema 为 `6`。旧协议、旧状态和旧数据库直接拒绝；没有兼容端点、migration 或 fallback。生产已按运维文档启用全新 schema 6 数据库，两端新包已发布；使用者须更新客户端。
 
 ## 结论与文档验收
@@ -108,3 +118,19 @@ Android 发送草稿不再以本地 WebSocket 写入成功为清空条件，仅�
 | Android | 2.0.11 / code 14 | 2171843 | `f3ecedeaf9addb76524fee255fbf39880ca27a8cff8c97508709f679a79c40a2` |
 
 本地发布证据位于 `artifacts/production-2026-09-11/`，包括联合清单和平台构建输出；二进制包与签名材料不提交 Git。物理 Android 设备的锁屏、通知声音、厂商保活和覆盖安装限制仍按用户确认保留。
+
+## 2026-09-12 Android 网络恢复发布记录
+
+本次发布 Android 2.0.12（versionCode 15），修复后台返回前台和默认网络变化后的连接恢复。服务端代码、协议 `codex-assistant.v3`、SQLite schema 6 及 Windows 2.0.13 均未变化，因此未重启线上服务。
+
+- Release APK 用仓库外 keystore 构建，`apksigner verify --verbose` 通过，单一签名者且 APK Signature Scheme v2 有效。
+- 专用 API 36 模拟器完成 20 次前后台恢复、3 次断网恢复及服务端主动关闭恢复；具体时延和限制见 [网络恢复设计](android-network-recovery.zh-CN.md)。
+- APK 先上传临时路径并在服务器计算 SHA-256，确认后以版本化不可变文件发布；联合清单以原子 rename 更新，旧清单备份到 `/var/backups/codex-assistant/20260912-network-recovery/download-manifest.json`。
+- 公网 HTTPS 完整下载复核：Android 2.0.12 与 Windows 2.0.13 的字节数和 SHA-256 均匹配联合清单；manifest 返回 `Cache-Control: no-store`，版本化 APK 返回 `public, max-age=31536000, immutable`；`/codex-assistant/health` 返回 `ok` 和 `codex-assistant.v3`。
+
+| 平台 | 发布版本 | 字节数 | SHA-256 |
+|---|---|---:|---|
+| Windows | 2.0.13 | 111697889 | `79ec01ab0cf9537f7bae7865c2d6358f63a2c2b5c596d7780e1c6d12f58fe3bf` |
+| Android | 2.0.12 / code 15 | 2171891 | `fe038752012028ae0b32a278fa08bb4e7996b9c29d786869cc3dd5fcdbbc8d13` |
+
+本地发布证据位于 `artifacts/production-2026-09-12/`；二进制包、下载副本、签名材料和运行时诊断不提交 Git。无真机时，锁屏、Doze、移动网络、通知声音、厂商后台策略和覆盖安装仍是明确限制。

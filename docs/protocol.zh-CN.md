@@ -55,6 +55,8 @@ Android 序列化启用 `encodeDefaults=true` 和 `explicitNulls=false`：auth/s
 
 Android 正常链路为 connecting → authenticating → subscribing → connected。断开后显示 offline/reconnecting 并按 1 至 6 秒延迟重试；not_configured 表示缺少 Token。auth_failed 与 protocol_error 为不可重试错误，保存配置后重建连接。当前没有独立的系统网络恢复回调，5 秒恢复目标尚未验证。
 
+待确认的 Android 修订见 [网络恢复合同](android-network-recovery.zh-CN.md)：保留以上线上字段和枚举，在客户端加入网络/前台唤醒；无默认网络暂停重试，有网络按1至6秒退避，仅 snapshot 重置计数。总握手25秒、onOpen至snapshot 15秒期限以先到者为准，超时关闭后重试。auth_failed/protocol_error 不被恢复信号重置。失效连接的任何回调不写状态或游标；重连不自动重发业务写入，服务端不新增请求结果重放保证。5秒仅为正常可控网络的待测验收目标，不是已通过结论。
+
 Windows 连接状态为 connecting/syncing/connected/offline，与 Android 状态机不同；connected 不代表待上传 outbox 已清空。TaskSnapshot 中 freshness 描述采集证据的新鲜度，不表示手机当前网络状态。
 
 HTTP body 上限 128 KiB，WebSocket 的 128 KiB 限制作用于客户端入站消息，服务端任务快照没有按该大小分块。慢订阅者缓冲达到 256 KiB 时以 1013 关闭连接，客户端自动重连并按游标重放和接收最新快照，不能静默跳过广播。这些边界需纳入后续稳定性验收。

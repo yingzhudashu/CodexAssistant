@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                                 Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("工作站连接", style = MaterialTheme.typography.labelLarge)
-                                    Text(connectionStatusLabel(state.connectionStatus), style = MaterialTheme.typography.headlineSmall)
+                                    Text(connectionSummary(state), style = MaterialTheme.typography.headlineSmall)
                                     Text(credentials.serverBaseUrl(), style = MaterialTheme.typography.bodyMedium)
                                     TextButton({ navigate("connection") }) { Text("查看连接与诊断  ›") }
                                 }
@@ -66,12 +66,12 @@ import kotlinx.coroutines.launch
                     }
                     "connection" -> {
                         item { SettingsSection("连接状态", "手机通过此服务与 Windows 工作站同步。") {
-                            Text(connectionStatusLabel(state.connectionStatus), style = MaterialTheme.typography.titleLarge)
+                            Text(connectionSummary(state), style = MaterialTheme.typography.titleLarge)
                             Text(credentials.serverBaseUrl()); state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                             Button(edit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("编辑连接") }
                         } }
                         item { SettingsSection("同步诊断", "遇到连接问题时，可用以下信息核对同步进度。") {
-                            Text("重连次数：${state.retryAttempt}"); Text("同步游标：${state.cursor}")
+                            Text(backgroundSyncSummary(state)); state.retryAtEpochMs?.let { Text("下次尝试：${java.util.Date(it)}") }; Text("重连次数：${state.retryAttempt}"); Text("同步游标：${state.cursor}")
                             Text("最近连接：${state.lastConnectedAtEpochMs?.let { java.util.Date(it).toString() } ?: "未连接"}")
                             Text("诊断标识：${state.lastTraceId ?: "未提供"}", style = MaterialTheme.typography.bodySmall)
                         } }

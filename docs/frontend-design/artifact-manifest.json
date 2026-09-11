@@ -1,15 +1,15 @@
 {
   "project": "CodexAssistant",
-  "version": "v3 implementation acceptance",
-  "date": "2026-09-11",
+  "version": "v3 network recovery implementation and release review",
+  "date": "2026-09-12",
   "sha256": {
-    "docs/frontend-design.zh-CN.md": "aad125239c4c31a86805cebd2fd72ed024454632219b035589955aef484e841b",
-    "docs/frontend-design/index.html": "d91bc3ac6f1875559ce60e39b08d0fae24821c5262424bec0d708911d2dd4aab",
-    "docs/frontend-design/spec.json": "347b669117901bb56515f986ba4ed6052777e0ea9c51a3b53476ff8103dcfaac",
+    "docs/frontend-design.zh-CN.md": "79529710812dca083be906f7824e7e5bde30f44c1d3957ffae146dd3ba252888",
+    "docs/frontend-design/index.html": "bc8b0dd8b6ac87fafd1cd50d34ea41988372ec27d020564f950dfae3aca3f1f6",
+    "docs/frontend-design/spec.json": "5bd516a578d9d545b943db031d45ddc16aea4276787245de667af9664aeb6367",
     "docs/frontend-design/render.py": "2dbc15483560055bdbb369c6e754901a9a6d68410cf13b79c52a6659189ed61d",
     "docs/frontend-design/validate.py": "62a58078bea422f8fcbcf0dc096e0d3310c92e6e16e3af3c44fa834ca66f393c",
-    "docs/frontend-design/review.md": "5458e4ccd2086dd98f850bcb332a231c5c8447a0509477ef75d81c863affb36e",
-    "docs/frontend-design/source-baseline.json": "cc1ec36ab696f77a10be73703d82b143552087707034671f8e63596708304f1e",
+    "docs/frontend-design/review.md": "44f645a9fc8e1025c9d1cbda9d813680a190d4afd90dabf9f0541eae5ac87247",
+    "docs/frontend-design/source-baseline.json": "3c0875630fcf31d2a5ac12a1bdc86292f75e3c308cc98a33688902e8c56b2eea",
     "docs/design-assets/final/CA-01-android.svg": "7490909f71e1d3d8a6b9b99b197a3b1147aac58a70274a412d87e125c9048ed1",
     "docs/design-assets/final/CA-01-i01.svg": "af97826657708ba2168fedf5c4ced5f3e8c673fe849bc1b739726c2dfd3d833d",
     "docs/design-assets/final/CA-01-i02.svg": "b7365c26cc958ce7576c58af9ee0dd0869ea7ff7e1079dae807ad2614a9bda7e",
@@ -55,7 +55,7 @@
     "docs/design-assets/final/CA-11-i01.svg": "bd24650f55601c8fa6fd0a052e5260b2ba6a91acf718ad117d3b5e905dfb9607",
     "docs/design-assets/final/CA-11-i02.svg": "a0fc50306e7d4b1a5e8311060037f8c3f3b1db84f316908070772f288823b66f",
     "docs/design-assets/final/CA-11-windows.svg": "42fa837e6055d0c04b88bf5dc0e2ac48e3d8349fd1415cecd02270c50dc1e9d5",
-    "docs/design-assets/final/CA-12-android.svg": "0c1c771de9e62cdde10d7f747246b5e5613426ad9db60e105a30828608988297",
+    "docs/design-assets/final/CA-12-android.svg": "a300bb272c06c4108afccdd5a6cafbdb48f1045b95a4c319af32efee397ec8a8",
     "docs/design-assets/final/CA-12-i01.svg": "949a1622b04125b8153e892ff16dc07910bddbffa2fd69562af887021b4af518",
     "docs/design-assets/final/CA-12-i02.svg": "7135d03753c5930ececef22f807ad2c1d5f840fc9f0fa4ae415e2d0939df6a26",
     "docs/design-assets/final/CA-12-windows.svg": "570b764ad75297cf8825577837868ed8679e698add257fbe98c1b2902443ece5",
@@ -67,6 +67,12 @@
     "docs/design-assets/final/system-confirm-windows.svg": "3a736104b797beef2d87d82ad869f62d4e45e91f084f5448b6980d5324734e44",
     "docs/design-assets/final/system-ime.svg": "18f8678872e97ac82478f78c52d8e1ea6a10786f9be7f4e3eb731f926cb233a9",
     "docs/design-assets/final/system-recovery.svg": "3286311b34dc700d4c2fb44a1498ec1c1f0d65404c7f7e9f4a515c63a49786b6",
-    "docs/acceptance.zh-CN.md": "fb9d9f7f28ba15a20f714d70a7ed724eb488e9eeab88a8541cbf0621c20f1171"
+    "docs/acceptance.zh-CN.md": "9aa55f04d606d2d9770c1a436feb20981578d4879edee1fc6020fac01c0e9c59",
+    "docs/android-network-recovery.zh-CN.md": "b9b7c9665f407458cf4f689f466a03102040c994f91e35ec41f0351c7a161b16",
+    "docs/architecture.zh-CN.md": "afbd1c4cc59356bef49d910d29d222c4662e0ce4f3bb3190e5a20129597a1ec7",
+    "docs/protocol.zh-CN.md": "e753e290243a6984ba3388a135e26256f93b7b441b2f2fdc80a7eed07f6e3160",
+    "docs/operations.zh-CN.md": "b9b1cf95662fddd9430e880ac33d5393f28f5aee3a87bd6fd91b978f8ee0e157",
+    "docs/README.md": "e16d7c3480321a32f07e7229cc483bb54cd4d8a9b4bdd96e94183a0205890cfb",
+    "docs/frontend-design/validation.json": "54eb89ae3d99d10edefa01f98179225e0f28ab7f22ec3b15d57eea4adc74580a"
   }
 }

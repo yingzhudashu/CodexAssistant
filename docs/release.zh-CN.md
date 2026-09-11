@@ -1,6 +1,6 @@
 # 安装包与发布
 
-当前源码 Windows 版本为 `2.0.13`，Android 为 `2.0.11`；Android `versionCode=14`，协议固定为 `codex-assistant.v3`。本次修复工作站消息在活动回合重复 resume 导致的 active writer 冲突，并确保 Android 仅在收到 started 回执后清空草稿。本轮协议与数据库 schema 均不变。
+当前源码 Windows 版本为 `2.0.13`，Android 为 `2.0.12`；Android `versionCode=15`，协议固定为 `codex-assistant.v3`。本次修复 Android 前后台切换后的网络恢复、连接代次隔离和后台同步状态。本轮协议与数据库 schema 均不变。
 
 ## 构建
 
@@ -46,4 +46,4 @@ Windows 使用 semver 比较顶层 version，仅提示更高的有效版本；An
 
 2026-09-10 已部署生产 release `20260910114414-a577603b9635`，并发布 Windows 2.0.12 与 Android 2.0.10（versionCode=13）及联合清单。旧数据库与旧下载清单保存在 `/var/backups/codex-assistant/20260910114414-a577603b9635`。线上检查与保留限制以 [验收记录](acceptance.zh-CN.md) 为准。Electron 更新为 44.3.0，ws 为 8.21.3。
 
-2026-09-11 已发布本次客户端修复包：Windows 2.0.13、Android 2.0.11（versionCode 14）。服务端、协议和 SQLite schema 没有变化，因此保留上述已验证的服务端 release，不重复部署。联合清单已原子更新，旧清单保存于 `/var/backups/codex-assistant/20260911-mobile-writer-fix/download-manifest.json`；完整公网下载哈希、缓存头和健康检查见 [验收记录](acceptance.zh-CN.md)。
+2026-09-12 已发布客户端网络恢复修复包：Windows 2.0.13、Android 2.0.12（versionCode 15）。服务端、协议和 SQLite schema 没有变化，保留已验证的服务端 release；联合清单已原子更新，旧清单保存于 `/var/backups/codex-assistant/20260912-network-recovery/download-manifest.json`。完整公网下载哈希、缓存头和健康检查见 [验收记录](acceptance.zh-CN.md)。

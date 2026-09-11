@@ -32,9 +32,11 @@ class SyncForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForegroundCompat(baseNotification("正在同步 Codex 任务"))
         val coordinator = (application as CodexAssistantApplication).sync
-        coordinator.start()
+        try { startForegroundCompat(baseNotification("正在同步 Codex 任务")) }
+        catch (_: IllegalStateException) { coordinator.serviceUnavailable(); stopSelf(); return }
+        catch (_: SecurityException) { coordinator.serviceUnavailable(); stopSelf(); return }
+        coordinator.serviceStarted(this)
         collectJob = scope.launch {
             coordinator.state().collectLatest { state ->
                 val current = state.tasks.associateBy { it.id }
@@ -52,27 +54,31 @@ class SyncForegroundService : Service() {
                 updateNotification(
                     when {
                         state.connected -> "同步中 · $summary 个进行中任务"
-                        state.error != null -> "连接中断，正在等待重连"
-                        else -> "正在连接 Codex 任务"
+                        else -> connectionSummary(state)
                     },
                 )
             }
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (collectJob == null) return START_NOT_STICKY
+        (application as CodexAssistantApplication).sync.serviceStarted(this)
+        return START_STICKY
+    }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
         // Android 15 ends the data-sync foreground-service allowance.
         // Stop within the system deadline; reopening the app can resume sync.
         stopForeground(STOP_FOREGROUND_REMOVE)
+        (application as CodexAssistantApplication).sync.serviceStopped(this, unavailable = true)
         stopSelf()
     }
 
     override fun onDestroy() {
         collectJob?.cancel()
         scope.cancel()
-        (application as CodexAssistantApplication).sync.stop()
+        (application as CodexAssistantApplication).sync.serviceStopped(this)
         super.onDestroy()
     }
 
