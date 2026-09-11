@@ -21,8 +21,13 @@ export const IN_PROGRESS_ITEM_MAX_AGE_MS = 6 * 60 * 60_000;
 const MAX_OUTBOX_EVENTS = 5_000;
 const MAX_FINGERPRINTS = 10_000;
 const RPC_CONCURRENCY = 8;
+export const ACTIVE_WRITER_MESSAGE = "此会话正由另一 Codex 实例处理，手机无法接管。请在该 Codex 实例中继续；其结束后可重新发送。";
 export type MonitorStatus = "connecting" | "syncing" | "connected" | "offline";
 const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
+
+function isActiveWriterError(error: unknown): boolean {
+  return error instanceof Error && /already has an active writer/i.test(error.message);
+}
 
 async function mapLimit<T, R>(values: T[], limit: number, worker: (value: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(values.length);
@@ -143,8 +148,13 @@ export class Monitor {
       await previous?.catch(() => undefined);
       if (this.#stopping) throw new Error("MONITOR_STOPPED");
       await this.#server.start();
-      await this.#server.resumeThread(threadId);
-      const current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
+      let current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
+      // The app-server allows steer only for the turn owned by this workstation.
+      // Do not resume again while that turn is live: resume competes for its writer.
+      if (!(current?.id && current.status === "inProgress")) {
+        await this.#server.resumeThread(threadId);
+        current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
+      }
       const response = asRecord(current?.id && current.status === "inProgress"
         ? await this.#server.steerTurn(threadId, current.id, text.trim())
         : await this.#server.startTurn(threadId, text.trim()));
@@ -152,7 +162,9 @@ export class Monitor {
       return { status: "started", ...(typeof turnId === "string" ? { turnId } : {}) };
     })();
     this.#sendRpcs.set(threadId, pending);
-    try { return await pending; } finally { if (this.#sendRpcs.get(threadId) === pending) this.#sendRpcs.delete(threadId); }
+    try { return await pending; }
+    catch (error) { if (isActiveWriterError(error)) throw new Error(ACTIVE_WRITER_MESSAGE); throw error; }
+    finally { if (this.#sendRpcs.get(threadId) === pending) this.#sendRpcs.delete(threadId); }
   }
 
   get interactions(): InteractionRequest[] { return [...this.#interactions.values()].map(p => p.request); }

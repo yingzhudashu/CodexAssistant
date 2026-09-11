@@ -52,13 +52,14 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
             viewModelScope.launch { delay(30000);if(detailRequests[threadId]?.first==id){detailRequests.remove(threadId);_state.value=_state.value.copy(loadingDetails=_state.value.loadingDetails-threadId,detailErrors=_state.value.detailErrors+(threadId to "工作站未响应，请重试读取"))} }
         }catch(e:Exception){_state.value=_state.value.copy(detailErrors=_state.value.detailErrors+(threadId to (e.message?:"读取失败")))}
     }
-    fun send(threadId:String,text:String) {
-        if(!_state.value.connected) return
+    fun send(threadId:String,text:String): String? {
+        if(!_state.value.connected) return null
         try {
             val id=coordinator.sendMessage(threadId,text)
             _state.value=_state.value.copy(sending=_state.value.sending+(threadId to id),results=_state.value.results-threadId)
             viewModelScope.launch { delay(120000);if(_state.value.sending[threadId]==id){_state.value=_state.value.copy(sending=_state.value.sending-threadId,results=_state.value.results+(threadId to ResultMessage("result",PROTOCOL_VERSION,id,threadId,"failed",error="结果尚未确认，请先读取回合摘要核实。消息不会自动重发。")))} }
-        }catch(e:Exception){_state.value=_state.value.copy(results=_state.value.results+(threadId to ResultMessage("result",PROTOCOL_VERSION,"",threadId,"failed",error=e.message?:"发送失败")))}
+            return id
+        }catch(e:Exception){_state.value=_state.value.copy(results=_state.value.results+(threadId to ResultMessage("result",PROTOCOL_VERSION,"",threadId,"failed",error=e.message?:"发送失败")));return null}
     }
     fun submitInteraction(request: InteractionRequest, value: JsonElement) {
         if (!_state.value.connected || request.requestId in _state.value.submittingInteractions) return

@@ -82,7 +82,9 @@ commandExecution/fileChange/requestApproval 显示命令、目录、原因或修
 
 请求 ID 使用随机 UUID，官方 RPC id 与 threadId/turnId 仅由工作站保存。服务端以 requestId+threadId 校验和幂等；处理中重复提交不再次转发，终态在当前服务进程内保留最多 1000 个回执用于重连/重复提交。超出窗口或服务重启返回 expired，绝不重新执行。手机断线不会取消请求；工作站重连重新发布尚未解决请求。官方解决通知、目标回合终止和 app-server 退出使请求过期。无官方截止时间时不臆造超时，也不把无回执当作成功。
 
-普通消息直接 resume/start/steer；只串行同一线程的 RPC 提交，上一条 RPC 完成即提交下一条，不等待回合结束、不建立本地任务审批或回合队列。发送失败与每个 requestId 关联。steer 关联同一 turn 的多条消息均接收终态。Android 连续消息保留最新请求的展示，旧回执不能清除新草稿。
+普通消息只串行同一线程的短 RPC 提交，上一条 RPC 完成即提交下一条，不等待回合结束、不建立本地任务审批或回合队列。工作站当前缓存的 turn 为 `inProgress` 时必须直接 `turn/steer`；不得先 `thread/resume`。不存在活动 turn 时才 `thread/resume`，resume 后若返回活动 turn 改用 steer，否则 `turn/start`。同一工作站的连续消息由官方 steer 接收并关联同一 turn。
+
+`thread/resume` 的官方 `already has an active writer` 失败不是可重试传输错误：它说明另一 Codex 实例持有会话写入权。工作站必须将其转换为固定的脱敏失败提示，不回传 threadId、原始 app-server 文本或其他实例信息；不得开始新 turn、重新 resume、排入本地队列或自动重试。手机保留草稿并结束当前 requestId；用户可在原实例结束会话后手动重新提交。其他发送失败仍与其 requestId 关联。Android 连续消息保留最新请求的展示，旧回执不能清除新草稿。
 
 筛选顺序为全部、进行中、已完成、失败、待确认。待处理交互优先于运行态；明确失败、官方当前活动、明确完成和证据过期按状态规则投影。运行证据不足归 needs_action；官方 Goal 的 active/paused/blocked 等属于输入域，转换成四种展示状态不是保留旧客户端协议。
 

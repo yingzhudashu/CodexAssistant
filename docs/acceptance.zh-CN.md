@@ -84,3 +84,27 @@
 按运维文档退出应用，将有效连接配置和整个旧 state 保存到本机独立恢复目录；保持地址和加密 Token 不变，生成新 deviceId，再以全新队列启动已安装的 Windows 2.0.12。没有转换旧事件、重用旧序号或修改 Codex 会话文件。
 
 恢复后实测确认采集与上传链路正常；真实队列序号、业务计数和设备状态只保存在仓库外。
+
+## 手机消息 active writer 修复（2026-09-11）
+
+用户截图确认 Android 发送消息时，工作站返回 `thread ... already has an active writer`。审查发现 Monitor 对每条消息都先调用 `thread/resume`，即使自身已缓存同一线程的 inProgress turn；该行为与 Codex app-server 的单写入者约束冲突。
+
+修复后的顺序是：当前工作站缓存 turn 为 inProgress 时只调用 `turn/steer`；无活动 turn 才调用 `thread/resume`，resume 后若返回活动 turn 则 steer，否则 start。每线程仍只串行短暂 RPC，不等待回合结束，也没有增加本地业务消息队列。`already has an active writer` 统一映射为脱敏归属提示，禁止重试、接管或新建 turn；服务端仍使用 requestId + threadId 关联回执，协议字段未变。
+
+Android 发送草稿不再以本地 WebSocket 写入成功为清空条件，仅在相同 requestId 收到工作站 `started` 回执后清空。工作站拒绝、归属冲突、断线和未知结果均保留草稿。Node 回归新增 direct-steer 和 active-writer 两个场景，最终为 12 文件 / 45 项通过；Android debug 单元测试、assembleDebug 和 lintDebug 通过。物理 Android 设备限制仍按用户确认保留。
+
+## 2026-09-11 客户端发布记录
+
+用户已授权发布、部署与本地提交。本次仅更新 Windows 与 Android 客户端；服务端协议仍为 `codex-assistant.v3`，SQLite schema 仍为 `6`，因此线上服务保留已验证的 `private-release-id` release。发布没有推送 Git 远程仓库。
+
+- Windows 2.0.13 已从本机已安装且版本匹配的 Electron 44.3.0 打包为 NSIS 安装包。该包为未签名状态（`NotSigned`），没有声称 Authenticode 信任。
+- Android 2.0.11（versionCode 14）已用仓库外 release keystore 构建；`apksigner verify --verbose` 通过，签名方案为 v2，单一签名者。
+- 两个版本化文件先上传到服务器临时目录并逐个比对 SHA-256；目标同名文件若存在不同字节会拒绝覆盖。验证后以原子 rename 替换 UTF-8 无 BOM 联合清单，旧清单备份到 `/var/backups/codex-assistant/20260911-mobile-writer-fix/download-manifest.json`。
+- 公网 HTTPS 验收：`/codex-assistant/health` 返回 `ok` 和 `codex-assistant.v3`；联合清单返回 `Cache-Control: no-store`，两个版本化安装包返回 `Cache-Control: public, max-age=31536000, immutable`。两个文件均完整下载后重新计算 SHA-256，与清单一致。
+
+| 平台 | 发布版本 | 字节数 | SHA-256 |
+|---|---|---:|---|
+| Windows | 2.0.13 | 111697889 | `79ec01ab0cf9537f7bae7865c2d6358f63a2c2b5c596d7780e1c6d12f58fe3bf` |
+| Android | 2.0.11 / code 14 | 2171843 | `f3ecedeaf9addb76524fee255fbf39880ca27a8cff8c97508709f679a79c40a2` |
+
+本地发布证据位于 `artifacts/production-2026-09-11/`，包括联合清单和平台构建输出；二进制包与签名材料不提交 Git。物理 Android 设备的锁屏、通知声音、厂商保活和覆盖安装限制仍按用户确认保留。
