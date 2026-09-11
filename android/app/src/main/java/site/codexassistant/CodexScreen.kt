@@ -84,7 +84,7 @@ internal var appearance by mutableStateOf("system")
                         credentials.saveConnection(url,token)
                         configured=true;editing=false;token=""
                         (context.applicationContext as CodexAssistantApplication).sync.restart()
-                        ContextCompat.startForegroundService(context,Intent(context,SyncForegroundService::class.java))
+                        (context.applicationContext as CodexAssistantApplication).sync.ensureForegroundService()
                     } catch(e:Exception) { error=e.message ?: "无法保存连接" }},enabled=token.length in 16..4096,modifier=Modifier.fillMaxWidth()){Text("保存并连接")}
                     if(configured) TextButton({cancel()}){Text("取消")}
                 }
@@ -137,7 +137,7 @@ internal fun openDownload(context:android.content.Context,url:String?) {
                 if(page!="tasks") SettingsPage(page,{page=it},state,credentials,onEditConnection,Modifier.weight(1f))
                 else {
                     if(dual || selected==null) LazyColumn(Modifier.then(if(dual) Modifier.width(320.dp) else Modifier.weight(1f)).fillMaxHeight(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                        item { Text("任务工作台",style=MaterialTheme.typography.headlineSmall);Text(connectionStatusLabel(state.connectionStatus),color=MaterialTheme.colorScheme.onSurfaceVariant) }
+                        item { if(state.backgroundSyncStatus=="unavailable") Text(backgroundSyncSummary(state)); Text("任务工作台",style=MaterialTheme.typography.headlineSmall);Text(connectionSummary(state),color=MaterialTheme.colorScheme.onSurfaceVariant) }
                         item { OutlinedTextField(query,{query=it},Modifier.fillMaxWidth(),label={Text("搜索任务或项目")},singleLine=true) }
                         item { Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                             taskStatusFilters.forEach{(id,label)->FilterChip(filter==id,{filter=id},label={Text(label)})}
@@ -223,7 +223,6 @@ private fun readableTurn(turn:JsonElement):String {
         } else null }?.joinToString("\n\n")
     return listOfNotNull(status?.let{mapOf("inProgress" to "进行中","completed" to "回合完成","interrupted" to "回合中断","failed" to "回合失败")[it]?:it},content?.takeIf{it.isNotBlank()}?:"此内容请在工作站查看").joinToString("\n")
 }
-internal fun connectionStatusLabel(status:String)=mapOf("connecting" to "连接中","authenticating" to "认证中","subscribing" to "同步中","connected" to "已连接","reconnecting" to "重连中","offline" to "网络离线","auth_failed" to "认证失败","protocol_error" to "协议错误","not_configured" to "未配置")[status]?:status
 private fun freshnessLabel(value:String)=mapOf("fresh" to "近期采集","stale" to "缓存","unavailable" to "无法采集")[value]?:value
 
 private class CodexViewModelFactory(private val application: CodexAssistantApplication) : androidx.lifecycle.ViewModelProvider.Factory {

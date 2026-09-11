@@ -14,7 +14,7 @@ android {
     namespace = "site.codexassistant"
     compileSdk = 35
     defaultConfig {
-        applicationId = "site.codexassistant"; minSdk = 26; targetSdk = 35; versionCode = 14; versionName = "2.0.11"
+        applicationId = "site.codexassistant"; minSdk = 26; targetSdk = 35; versionCode = 15; versionName = "2.0.12"
     }
     signingConfigs {
         create("release") {
@@ -58,4 +58,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit4)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

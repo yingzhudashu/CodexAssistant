@@ -6,8 +6,7 @@ import java.util.UUID
 import kotlin.math.max
 
 /** Android 端的轻量 trace 记录器：只缓存 span 名称、ID 和耗时，绝不记录 Token 或任务正文。 */
-class TraceLogger {
-    private val tag = "CodexAssistantTrace"
+class TraceLogger(private val log: (String) -> Unit = { Log.d("CodexAssistantTrace", it); Unit }) {
     private val pending = LinkedHashMap<String, TraceSpan>()
     private val lastSpanByTrace = mutableMapOf<String, String>()
 
@@ -44,6 +43,6 @@ class TraceLogger {
             lastSpanByTrace[traceId] = spanId
             while (pending.size > 100) pending.remove(pending.keys.first())
         }
-        Log.d(tag, "span=${span.name} traceId=$traceId durationMs=$durationMs")
+        log("span=${span.name} traceId=$traceId durationMs=$durationMs")
     }
 }

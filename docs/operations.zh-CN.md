@@ -17,6 +17,7 @@ Nginx 必须保留 `/codex-assistant/` 前缀，并为 `/api/v3/stream` 设置 W
 - `SCHEMA_MISMATCH`：停止服务，备份旧数据库后部署干净状态；不执行 migration。
 - outbox 持续增长：检查公网入口、Token、Nginx upgrade 和服务端 health/日志。
 - WebSocket 频繁断开：检查证书、反代超时和 Android 网络；客户端会携带持久化 cursor 回放。
+- Android 返回前台仍离线：2.0.11 缺少主动恢复唤醒及系统默认网络回调；本轮 [恢复设计](android-network-recovery.zh-CN.md) 待确认，不能把方案当成已发布修复。先区分“手机网络不可用”“同步服务停止”“认证失败”和“工作站未连接”，不要为这些不同错误统一重置 Token。
 - app-server 超时：检查 `codex` 可执行文件和登录状态；trace 只记录诊断事件，不保存原始 stderr；单个线程失败不会阻塞其他线程。
 
 发布回滚只能切换到上一份已验证 release。若数据库 schema 不一致，旧 release 也必须停止，不能强行复用新数据库。

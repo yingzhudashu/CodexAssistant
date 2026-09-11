@@ -1,57 +1,114 @@
 package site.codexassistant
 
 import android.content.Context
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 
-/**
- * 进程内唯一的同步入口。前台服务负责维持生命周期，Compose 只订阅状态，
- * 避免界面和服务各自打开 WebSocket 造成重复流量和重复通知。
- */
+/** Application-wide ownership: a visible Activity and the foreground service share one socket. */
 class SyncCoordinator(context: Context) {
-    private val appContext = context.applicationContext
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val mutableState = MutableStateFlow(TaskState())
-    private var job: Job? = null
-    @Volatile private var repository: TaskRepository? = null
+    private val appContext=context.applicationContext
+    private val connectivity=appContext.getSystemService(ConnectivityManager::class.java)
+    private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
+    private val mutableState=MutableStateFlow(TaskState())
+    private var job:Job?=null
+    @Volatile private var repository:TaskRepository?=null
+    private var visible=false
+    private var hasBeenForeground=false
+    private var service:Any?=null
+    private var background="stopped"
+    private var network:Network?=null
+    private var callback:ConnectivityManager.NetworkCallback?=null
+    fun state():StateFlow<TaskState> = mutableState.asStateFlow()
 
-    fun state(): StateFlow<TaskState> = mutableState.asStateFlow()
-
-    @Synchronized
-    fun start() {
-        if (job?.isActive == true) return
-        val credentials = CredentialStore(appContext)
-        mutableState.value = mutableState.value.copy(cursor = credentials.cursor())
-        val nextRepository = TaskRepository(credentials)
-        repository = nextRepository
-        job = scope.launch {
-            nextRepository.stream().collect { if (repository === nextRepository) mutableState.value = it }
-        }
+    @Synchronized fun foreground() {
+        val returning=hasBeenForeground && !visible
+        visible=true
+        hasBeenForeground=true
+        start()
+        refreshNetwork(returning)
     }
-
-    @Synchronized
-    fun stop() {
-        repository = null
-        job?.cancel()
-        job = null
-        mutableState.value = mutableState.value.copy(connected = false, connectionStatus = "offline", error = "同步服务已停止，打开应用后恢复")
+    @Synchronized fun background(changingConfiguration:Boolean) {
+        if(changingConfiguration) return
+        visible=false
+        stopIfUnowned()
     }
-
-    /** 保存新凭据后丢弃旧连接状态，并立刻按新地址和 Token 重建唯一 WebSocket。 */
-    @Synchronized
-    fun restart() {
-        stop()
-        mutableState.value = TaskState(cursor = CredentialStore(appContext).cursor())
+    @Synchronized fun serviceStarted(owner:Any) {
+        service=owner;background="running"
+        mutableState.value=mutableState.value.copy(backgroundSyncStatus=background)
         start()
     }
-
-    fun requestDetail(threadId: String, cursor: String? = null): String = repository?.requestDetail(threadId, cursor) ?: error("连接不可用")
-    fun sendMessage(threadId: String, text: String): String = repository?.sendMessage(threadId, text) ?: error("连接不可用")
-    fun submitInteraction(requestId: String, threadId: String, value: kotlinx.serialization.json.JsonElement): Boolean = repository?.submitInteraction(requestId, threadId, value) == true
+    @Synchronized fun serviceStopped(owner:Any,unavailable:Boolean=false) {
+        if(service!==owner) return
+        service=null;background=if(unavailable) "unavailable" else "stopped"
+        mutableState.value=mutableState.value.copy(backgroundSyncStatus=background)
+        stopIfUnowned()
+    }
+    @Synchronized fun serviceUnavailable() {
+        if(service==null) { background="unavailable";mutableState.value=mutableState.value.copy(backgroundSyncStatus=background) }
+    }
+    fun ensureForegroundService() {
+        if(CredentialStore(appContext).token()==null) return
+        try { ContextCompat.startForegroundService(appContext,Intent(appContext,SyncForegroundService::class.java)) }
+        catch(_:IllegalStateException) { serviceUnavailable() }
+        catch(_:SecurityException) { serviceUnavailable() }
+    }
+    private fun refreshNetwork(foreground:Boolean=false) {
+        val current=connectivity.activeNetwork
+        updateNetwork(current,foreground)
+    }
+    private fun updateNetwork(next:Network?,foreground:Boolean=false) {
+        val changed=network!=next
+        network=next
+        mutableState.value=mutableState.value.copy(networkAvailable=next!=null)
+        repository?.recover(next!=null,foreground,changed)
+    }
+    private fun start() {
+        if((!visible && service==null) || job?.isActive==true) return
+        val credentials=CredentialStore(appContext)
+        if(credentials.token()==null) {
+            mutableState.value=mutableState.value.copy(connectionStatus="not_configured",error="请先配置访问 Token")
+            return
+        }
+        if(callback==null) {
+            val listener=object:ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(n:Network) { synchronized(this@SyncCoordinator) {
+                    if(callback===this) updateNetwork(n)
+                } }
+                override fun onLost(n:Network) { synchronized(this@SyncCoordinator) {
+                    if(callback===this && network==n) updateNetwork(null)
+                } }
+            }
+            callback=listener
+            connectivity.registerDefaultNetworkCallback(listener)
+        }
+        network=connectivity.activeNetwork
+        val initial=mutableState.value.copy(cursor=credentials.cursor(),networkAvailable=network!=null,backgroundSyncStatus=background,connected=false)
+        mutableState.value=initial
+        val next=TaskRepository(credentials,initial)
+        repository=next
+        job=scope.launch {
+            next.stream().collect { incoming -> synchronized(this@SyncCoordinator) {
+                if(repository===next) mutableState.value=incoming.copy(backgroundSyncStatus=background,networkAvailable=network!=null)
+            } }
+        }
+    }
+    private fun stopIfUnowned() { if(!visible && service==null) stop() }
+    private fun stop() {
+        repository?.stop();repository=null
+        job?.cancel();job=null
+        callback?.let { connectivity.unregisterNetworkCallback(it) };callback=null
+        mutableState.value=mutableState.value.copy(connected=false,connectionStatus="offline",retryAtEpochMs=null,error="同步服务已停止，打开应用后恢复",backgroundSyncStatus=background)
+    }
+    @Synchronized fun restart() {
+        stop()
+        mutableState.value=TaskState(cursor=CredentialStore(appContext).cursor(),backgroundSyncStatus=background)
+        start()
+    }
+    fun requestDetail(threadId:String,cursor:String?=null):String = repository?.requestDetail(threadId,cursor) ?: error("连接不可用")
+    fun sendMessage(threadId:String,text:String):String = repository?.sendMessage(threadId,text) ?: error("连接不可用")
+    fun submitInteraction(requestId:String,threadId:String,value:kotlinx.serialization.json.JsonElement):Boolean = repository?.submitInteraction(requestId,threadId,value)==true
 }

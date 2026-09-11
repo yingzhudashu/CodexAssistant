@@ -21,8 +21,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (CredentialStore(this).token() != null) {
-            ContextCompat.startForegroundService(this, Intent(this, SyncForegroundService::class.java))
-        }
+        val sync = (application as CodexAssistantApplication).sync
+        sync.foreground()
+        sync.ensureForegroundService()
+    }
+
+    override fun onStop() {
+        (application as CodexAssistantApplication).sync.background(isChangingConfigurations)
+        super.onStop()
     }
 }
