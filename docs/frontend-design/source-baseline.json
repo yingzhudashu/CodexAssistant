@@ -1,13 +1,13 @@
 {
-  "date": "2026-09-10",
-  "head": "085d138b31056345fb93c7520766b9c43a5a16b1",
+  "date": "2026-09-11",
+  "head": "6a518545dd76388cd475addf340ab67d54a7acb8",
   "working_tree_sha256": {
-    "android/app/src/main/java/site/codexassistant/CodexScreen.kt": "aaac6ca9be9624f8d7c5d22be5e580c6e6d1d83db5a4146189dd8ad98fb36aff",
+    "android/app/src/main/java/site/codexassistant/CodexScreen.kt": "97da05c3c35bb989cce566c2af9e28be0ac0798a7ebbc782a428b2503ee71df3",
     "apps/desktop/src/desktop-config.ts": "765405ef114b6b24881ea4415ba2326eae1b354b3579891a4d653bf51ac97a4d",
     "apps/desktop/src/main.ts": "c25706a07d8924f35d150b6746bb8e8d0c4621a49669183686a0f80fa156f225",
     "packages/protocol/src/index.ts": "f2c6ca89463a1008f78a78883f43e7eddbda26f5aca6bec1ffbe60e446945f79",
     "apps/server/src/app.ts": "230e562964dff54feddb910aabb511854fafdd54d999b542573ad873272e909d",
-    "apps/desktop/src/monitor.ts": "12eb4976b2bd462b0e15168a2e5627ccc47a276000ab5e3e9bf82632f8028c06",
+    "apps/desktop/src/monitor.ts": "98354f1da05e9663c0a1496d995a9f2645f943e21d499793bea4c9b6c8257fab",
     "apps/desktop/src/renderer/workspace.js": "1e9867042ec15b0b344ea3df3beac8b5f78efc0ef09d59619986832669780d72",
     "android/app/src/main/java/site/codexassistant/NavigationRules.kt": "15b7e48b273c2046fd69431dd19f3d52f6e5de32f68f30f7fb98967421826e6c",
     "android/app/src/main/java/site/codexassistant/TaskPresentation.kt": "8ff341cc97fe6e64c14e1720357fea17f8018d00603f173716bbc04515fb79b6",
@@ -16,7 +16,7 @@
     "android/app/src/main/java/site/codexassistant/InteractionCard.kt": "2a5fd39893107511eb9745c69d052bf9128a905a69a404e15ac56a5e6333c32a",
     "android/app/src/main/java/site/codexassistant/Models.kt": "c481b08f488ff0d2033864513ef376ae9a0cdb93d5dab7a3a1a54fce0f62c9bf",
     "android/app/src/main/java/site/codexassistant/TaskRepository.kt": "42438fac444e414c17757eb9f2f807c8eb25269df2a5cba0c5cce7cee60b09a8",
-    "android/app/src/main/java/site/codexassistant/CodexViewModel.kt": "15468a4bc32e64afcf30f5fe2fc88328704d7db09c702e217982b78ad18f47d3",
+    "android/app/src/main/java/site/codexassistant/CodexViewModel.kt": "40d9a07a6a4beba6fbe378abc7972c5255b22584206cffc72efe47bf82718cd9",
     "apps/desktop/src/interactions.ts": "274c6c5546087b8778d0adab74d20db00e19a256a38b697460810f0dd3b92454",
     "apps/desktop/src/renderer/interactions.js": "4b3afd50aa983005afd380db3b68dbda5e2a4cd00fdee43427ad2274520c49f7",
     "android/app/src/main/java/site/codexassistant/MainActivity.kt": "06d5cc5c22e2e63a9822224bb61a578d83248e6fc0c8600de734ae4224d7219c",
@@ -24,5 +24,5 @@
     "android/app/src/main/java/site/codexassistant/SyncCoordinator.kt": "5a23987c4c7115473f434b4ef4f1ba92798253619a93b44700ce09f0bab010e1",
     "apps/desktop/src/updates.ts": "1350057043d22382f17704c02b67e72bc7d2eecd9e15041c0f99715b73e69a0c"
   },
-  "purpose": "2026-09-10 implementation acceptance baseline; replaces pre-development baseline, not evidence of user approval"
+  "purpose": "2026-09-11 implementation acceptance baseline; replaces pre-development baseline, not evidence of user approval"
 }

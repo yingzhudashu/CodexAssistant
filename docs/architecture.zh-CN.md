@@ -6,7 +6,7 @@
 - Windows renderer 的消息格式化必须在本地完成且先转义原文；表格、代码块、列表和行内公式只能生成安全的展示节点，不新增远程接口或上传正文。布局断点优先保证详情正文和输入区的可用宽高。
 
 - Android 一级导航只存在于任务首页和设置首页。详情页、设置二级页进入独立页面栈；系统返回先退出输入法/弹层，再按二级页 → 设置首页 → 任务首页逐级返回。
-- Windows 本机控制与云端同步分别建模：`workstation.status.ready` 由 app-server initialize/initialized 握手及退出/停止事件决定；`sync.status` 仅表示采集/上传循环。renderer 使用前者判断本机 IPC 发送，不再把 syncing/offline 当作本机不可用。`task.send` 等待唯一启动 Promise 后执行 resume/start/steer，启动或 resume 失败返回对应消息的失败回执。Android 仍经云端 WebSocket 转发，不改变服务端鉴权和工作站不可达回执。
+- Windows 本机控制与云端同步分别建模：`workstation.status.ready` 由 app-server initialize/initialized 握手及退出/停止事件决定；`sync.status` 仅表示采集/上传循环。renderer 使用前者判断本机 IPC 发送，不再把 syncing/offline 当作本机不可用。`task.send` 等待唯一启动 Promise；已知本工作站的进行中回合直接 `turn/steer`，不再调用 `thread/resume` 争夺同一写入权；非活动会话才 resume 后 start。Android 仍经云端 WebSocket 转发，不改变服务端鉴权和工作站不可达回执。
 - Windows 托盘资源必须从 `apps/desktop/assets/tray.ico` 读取并通过 `nativeImage.createFromPath` 创建；构建时校验文件存在且为有效 ICO，运行时不得回退到透明占位图或 SVG data URL。
 - 任务状态唯一来源是协议 `TaskStatusSchema` 的四状态：running、needs_action、completed、failed。Android、Windows 的标签、筛选项、通知摘要和空态均由同一固定映射派生，连接状态和 freshness 独立展示。
 
@@ -64,7 +64,9 @@ CodexAssistant 是 Codex 的移动伴侣，不重新实现 Codex 能力。Window
 
 Windows `interactions.get` 与 `interaction.submit` 是本机 IPC，使用与 Android 相同的 Monitor 入口；终态结果最多保留1000项。官方进程退出或回合完成触发过期，手机断线不执行回答。工作站连接恢复后重新发布尚未解决的请求。服务端重启无法证明历史提交结果，只返回 expired，不自动重发。
 
-普通消息只串行同线程短暂的 RPC 提交，不等待回合结束。连续消息由官方 start/steer 接收，CodexAssistant 不建立业务队列或消息审批。独立启动的 app-server 无法响应另一 Codex 桌面进程拥有的交互；此能力未被本轮实现或宣称支持。
+普通消息只串行同线程短暂的 RPC 提交，不等待回合结束。工作站先读取自己已缓存的当前 turn：其为 `inProgress` 时直接调用官方 `turn/steer`；没有活动 turn 时才调用 `thread/resume`，并在 resume 返回活动 turn 时改为 steer，否则调用 `turn/start`。这样本工作站连续手机消息进入 Codex 原生 steer，不会因重复 resume 触发单写入者冲突。CodexAssistant 不建立业务队列或消息审批。
+
+`thread/resume` 返回 `already has an active writer` 表示写入权属于另一 Codex 实例，不能用本地重试、换 turn 或伪造队列接管。工作站将该原始错误转换为稳定的脱敏用户提示“此会话正由另一 Codex 实例处理，手机无法接管。请在该 Codex 实例中继续；其结束后可重新发送。”并关联原 requestId。Android 保留草稿、结束本次发送；只有用户在确认原会话结束后再次点击才会创建新 requestId。独立启动的 app-server 无法响应另一 Codex 桌面进程拥有的交互；此能力未被本轮实现或宣称支持。
 
 Android 设置使用独立 SettingsPage 模块：连接摘要、设备偏好分组、分区说明、≥48dp目标、居中最大720dp。主题立即应用并保存；连接编辑使用原有安全存储和未保存确认；交互秘密只驻留内存。
 

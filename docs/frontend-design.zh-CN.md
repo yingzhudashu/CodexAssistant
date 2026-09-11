@@ -536,15 +536,15 @@ Android 设置页：居中最大720dp、外边距24dp；顶部连接卡片，设
 
 **布局**：聊天模板：顶部会话标题与最多2条上下文信息；用户消息右对齐、助手回答左对齐；消息内容最大800宽，手机铺满减32；正文独立滚动，80高输入面板固定在操作栏上方；其余字段在消息关联详情中展开。空态不生成假历史消息。
 
-**数据绑定**：`apps/desktop/src/renderer/workspace.js`。task.send / ClientSendMessage；resumeThread后inProgress→steer，否则startTurn。
+**数据绑定**：`apps/desktop/src/renderer/workspace.js`。task.send / ClientSendMessage；本工作站缓存回合为inProgress时直接steer；无活动回合才resume，resume后活动则steer，否则start。
 
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
 |目标任务|record|同步协调器|只读threadId关联的标题，禁止自动切换目标|
 |消息内容|textarea|请补充断线恢复的检查结果。|1–20000字符；只去首尾空白；保留正文换行|
-|发送状态|record|尚未发送|本地idle→submitting→accepted，之后运行状态来自实际turn事件|
+|发送状态|record|尚未发送|本地idle→submitting→accepted，之后运行状态来自实际turn事件；另一实例持有写入权时为本次失败，不显示原始thread或app-server错误|
 
-**页面规则**：不提供不存在的停止/远程批准按钮；waitingOnApproval只引导工作站处理。发送回执不是任务完成；当前端未实现streaming时也必须展示已接受而非生成假回答。
+**页面规则**：不提供不存在的停止/远程批准按钮；waitingOnApproval只引导工作站处理。发送回执不是任务完成；当前端未实现streaming时也必须展示已接受而非生成假回答。已知本工作站运行中的回合直接进入Codex原生steer，不显示人为队列。若另一Codex实例持有写入权，显示“此会话正由另一Codex实例处理，手机无法接管。请在该Codex实例中继续；其结束后可重新发送。”，保留草稿并结束发送；不得显示原始already has an active writer、threadId或“正在排队”。
 
 **空态/加载/错误**：首次读取显示“正在加载向工作站发送消息”；成功无记录显示“暂无向工作站发送消息记录”并保留入口操作。失败就地显示错误区；旧数据标“上次同步”；离线远端写操作禁用；本地查看、返回、复制、外观保存和已明确允许的配置保存仍可用。
 
@@ -563,9 +563,9 @@ Android 设置页：居中最大720dp、外边距24dp；顶部连接卡片，设
 |事件/调用|`task.send / send(threadId,text,requestId)`|
 |处理中|“发送”禁用并显示“处理中…”；本页对象保留，禁止并发重复提交。|
 |成功|收到started显示“已发送，工作站开始处理”；清空本次草稿并进入CA-07。|
-|失败/重试|失联/超时保留原文，提示“尚未确认是否送达，请刷新回合后决定是否重新发送”；禁止自动重发。|
+|失败/重试|失联/超时保留原文，提示“尚未确认是否送达，请刷新回合后决定是否重新发送”；禁止自动重发。另一实例持有写入权时保留原文，显示归属提示；只允许用户在原实例结束后手动再次发送，不尝试接管、换turn或本地排队。|
 |返回/取消|返回触发页面，恢复原焦点/滚动；未保存输入按G03确认；在途操作不被伪装取消。|
-|验收|Given 操作前示例数据；When 触发“发送”；Then 只有真实回执后呈现上述结果。另模拟失败、双击、离开页面，核对G02/G03。|
+|验收|Given 操作前置条件满足；When 当前工作站的同一回合为inProgress后点击发送；Then 只调用steer、不调用resume，收到started。When resume返回active writer；Then 保留草稿、显示归属提示、不泄露原始错误或threadId，且不再发送RPC。另模拟失联、双击、离开页面，核对G02/G03。|
 
 ![CA-06.I01 操作前、处理中、成功与失败](design-assets/final/CA-06-i01.svg)
 

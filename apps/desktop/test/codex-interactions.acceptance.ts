@@ -5,15 +5,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
-import { Monitor } from '../src/monitor.js';
+import { ACTIVE_WRITER_MESSAGE, Monitor } from '../src/monitor.js';
 
-const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, response: vi.fn(), turn: undefined as any, starts: 0, steers: 0 }));
+const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, response: vi.fn(), turn: undefined as any, starts: 0, steers: 0, resumes: 0, resumeError: undefined as Error | undefined }));
 vi.mock('../src/app-server.js', () => ({ CodexAppServer: class {
   constructor(options: any) { state.request = options.onRequest; state.notification = options.onNotification; }
   get ready() { return true; }
   async start() {} async stop() {} setTraceContext() {}
   async listThreads() { return []; }
-  async resumeThread() {} latestTurn() { return state.turn; }
+  async resumeThread() { state.resumes++; if (state.resumeError) throw state.resumeError; } latestTurn() { return state.turn; }
   async startTurn() { state.starts++; state.turn = { id: 'turn-1', status: 'inProgress' }; return { turn: state.turn }; }
   async steerTurn() { state.steers++; return { turnId: 'turn-1' }; }
   respond(id: number | string, result: unknown) { state.response(id, result); }
@@ -25,9 +25,9 @@ vi.mock('ws', () => ({ default: class extends EventEmitter {
   close() { this.readyState = 3; this.emit('close'); }
 } }));
 const cleanup: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const f of cleanup.splice(0)) await f(); vi.unstubAllGlobals(); state.response.mockReset(); });
+afterEach(async () => { for (const f of cleanup.splice(0)) await f(); vi.unstubAllGlobals(); state.response.mockReset(); state.resumeError = undefined; });
 async function fixture() {
-  state.turn = undefined; state.starts = 0; state.steers = 0;
+  state.turn = undefined; state.starts = 0; state.steers = 0; state.resumes = 0;
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200 })));
   const directory = await mkdtemp(join(tmpdir(), 'codex-interaction-audit-'));
   const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: 'http://127.0.0.1:3240', token: 'synthetic-test-token', deviceId: 'test-device', onTasks() {} });
@@ -84,7 +84,25 @@ it('serializes only RPC submission, steering subsequent messages before the turn
   const socket = await fixture();
   for (let i = 1; i <= 3; i++) socket.emit('message', JSON.stringify({ type: 'send', requestId: `send-${i}`, threadId: 'thread-1', text: `message ${i}` }));
   await vi.waitFor(() => expect(socket.sent.filter((m: any) => m.type === 'result' && m.status === 'started')).toHaveLength(3));
-  expect(state.starts).toBe(1); expect(state.steers).toBe(2);
+  expect(state.starts).toBe(1); expect(state.resumes).toBe(1); expect(state.steers).toBe(2);
   state.notification({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } });
   expect(socket.sent.filter((m: any) => m.status === 'completed').map((m: any) => m.requestId)).toEqual(['send-1', 'send-2', 'send-3']);
+});
+
+it('steers a known active workstation turn without attempting resume', async () => {
+  const socket = await fixture();
+  state.turn = { id: 'turn-1', status: 'inProgress' };
+  socket.emit('message', JSON.stringify({ type: 'send', requestId: 'steer-only', threadId: 'thread-1', text: 'continue' }));
+  await vi.waitFor(() => expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'steer-only', status: 'started' })));
+  expect(state.resumes).toBe(0); expect(state.starts).toBe(0); expect(state.steers).toBe(1);
+});
+
+it('redacts an active writer conflict and leaves the request failed without retrying', async () => {
+  const socket = await fixture();
+  state.resumeError = new Error('thread secret-thread already has an active writer');
+  socket.emit('message', JSON.stringify({ type: 'send', requestId: 'writer-conflict', threadId: 'secret-thread', text: 'continue' }));
+  await vi.waitFor(() => expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'writer-conflict', status: 'failed', error: ACTIVE_WRITER_MESSAGE })));
+  const result = socket.sent.find((value: any) => value.requestId === 'writer-conflict');
+  expect(result.error).not.toContain('secret-thread');
+  expect(state.resumes).toBe(1); expect(state.starts).toBe(0); expect(state.steers).toBe(0);
 });
