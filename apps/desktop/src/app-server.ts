@@ -194,7 +194,18 @@ export class CodexAppServer {
 
   async readThread(idValue: string): Promise<unknown> { return this.request("thread/read", { threadId: idValue }); }
   async listTurns(idValue: string, cursor?: string): Promise<unknown> { return this.request("thread/turns/list", { threadId: idValue, limit: 20, itemsView: "summary", sortDirection: "desc", cursor: cursor ?? null }); }
+  async recoverActiveTurn(idValue: string): Promise<{ id?: string; status?: string } | undefined> {
+    const value = await this.listTurns(idValue);
+    const rows = (value as { data?: unknown[] })?.data;
+    if (!Array.isArray(rows)) return undefined;
+    const active = rows.find((row) => row && typeof row === "object" && (row as { status?: unknown }).status === "inProgress") as { id?: unknown; status?: unknown } | undefined;
+    return typeof active?.id === "string" ? { id: active.id, status: "inProgress" } : undefined;
+  }
   latestTurn(idValue: string): unknown | undefined { return this.#latestTurns.get(idValue); }
+  ownsTurn(idValue: string, turnId: string): boolean {
+    const turn = this.#latestTurns.get(idValue) as { id?: unknown } | undefined;
+    return turn?.id === turnId;
+  }
   async listItems(idValue: string, cursor?: string): Promise<unknown> { return this.request("thread/items/list", { threadId: idValue, limit: 100, sortDirection: "desc", cursor: cursor ?? null }); }
   async resumeThread(idValue: string): Promise<unknown> {
     const value = await this.request("thread/resume", { threadId: idValue }) as { thread?: { turns?: unknown[] } };

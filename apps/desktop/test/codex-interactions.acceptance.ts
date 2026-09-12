@@ -14,6 +14,8 @@ vi.mock('../src/app-server.js', () => ({ CodexAppServer: class {
   async start() {} async stop() {} setTraceContext() {}
   async listThreads() { return []; }
   async resumeThread() { state.resumes++; if (state.resumeError) throw state.resumeError; } latestTurn() { return state.turn; }
+  async recoverActiveTurn() { return undefined; }
+  ownsTurn() { return false; }
   async startTurn() { state.starts++; state.turn = { id: 'turn-1', status: 'inProgress' }; return { turn: state.turn }; }
   async steerTurn() { state.steers++; return { turnId: 'turn-1' }; }
   respond(id: number | string, result: unknown) { state.response(id, result); }

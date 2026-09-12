@@ -103,6 +103,22 @@
 
 Android 发送草稿不再以本地 WebSocket 写入成功为清空条件，仅在相同 requestId 收到工作站 `started` 回执后清空。工作站拒绝、归属冲突、断线和未知结果均保留草稿。Node 回归新增 direct-steer 和 active-writer 两个场景，最终为 12 文件 / 45 项通过；Android debug 单元测试、assembleDebug 和 lintDebug 通过。物理 Android 设备限制仍按用户确认保留。
 
+## 手机消息自有回合误报修复（2026-09-12）
+
+工作站刚通过官方 `turn/start` 创建的回合，在通知到达本地缓存前收到手机消息时，发送路径可能先调用 `thread/resume`，官方返回 `already has an active writer`，被错误显示为“另一 Codex 实例”。现改为遇到该错误立即读取同线程 `thread/turns/list`；若存在 `inProgress` 回合则直接 `turn/steer`，仅在权威读取仍无活动回合时保留真正的外部实例冲突提示。
+
+新增回归覆盖“缓存为空、resume 冲突、权威活动回合、steer 成功”路径；全量 Node 测试为 12 文件 / 46 项通过。协议字段、服务端 schema 和 Android 包无需变化。
+
+## 2026-09-12 active-writer 误判修复发布
+
+发布 Windows 2.0.14 和 Android 2.0.13（versionCode 16）。工作站遇到 `already has an active writer` 时先读取权威回合，但只有当前 app-server 已观察过同一 turn 才执行 `turn/steer`；否则保留真实外部实例冲突提示。全量 Node 回归 12 文件 / 46 项通过，协议 `codex-assistant.v3` 和 SQLite schema 6 未变化。
+
+Windows 安装包未签名；Android Release APK 使用仓库外 keystore，签名 v2 校验通过。两个文件上传前后均按 SHA-256 校验，联合清单原子更新；公网完整下载和健康检查通过后才完成发布。
+
+## 2026-09-12 active-writer 修复包公网验收
+
+Windows `2.0.14`：`111614927` 字节，SHA-256 `15c8f5a98ddbd78c29b1549a14e85bdfdc5f9e6aa39a382963f1d727c051812e`，未签名。Android `2.0.13/code 16`：`2171895` 字节，SHA-256 `96e65e7d474e3f03d00fdbf21618cd536d5ab8d4d0be058fddc35f192a1ecd6c`，release 签名 v2 有效。两个包均经 HTTPS 完整下载复核，清单哈希、字节数和 `immutable` 缓存头一致；生产 health 返回 `ok` / `codex-assistant.v3`。
+
 ## 2026-09-11 客户端发布记录
 
 用户已授权发布、部署与本地提交。本次仅更新 Windows 与 Android 客户端；服务端协议仍为 `codex-assistant.v3`，SQLite schema 仍为 `6`，因此线上服务保留已验证的 `private-release-id` release。发布没有推送 Git 远程仓库。
