@@ -70,7 +70,7 @@ Windows `interactions.get` 与 `interaction.submit` 是本机 IPC，使用与 An
 
 普通消息只串行同线程短暂的 RPC 提交，不等待回合结束。工作站先读取自己已缓存的当前 turn：其为 `inProgress` 时直接调用官方 `turn/steer`；没有活动 turn 时才调用 `thread/resume`，并在 resume 返回活动 turn 时改为 steer，否则调用 `turn/start`。这样本工作站连续手机消息进入 Codex 原生 steer，不会因重复 resume 触发单写入者冲突。CodexAssistant 不建立业务队列或消息审批。
 
-`thread/resume` 返回 `already has an active writer` 表示写入权属于另一 Codex 实例，不能用本地重试、换 turn 或伪造队列接管。工作站将该原始错误转换为稳定的脱敏用户提示“此会话正由另一 Codex 实例处理，手机无法接管。请在该 Codex 实例中继续；其结束后可重新发送。”并关联原 requestId。Android 保留草稿、结束本次发送；只有用户在确认原会话结束后再次点击才会创建新 requestId。独立启动的 app-server 无法响应另一 Codex 桌面进程拥有的交互；此能力未被本轮实现或宣称支持。
+`thread/resume` 返回 `already has an active writer` 时，工作站先对同一线程执行一次权威 `thread/turns/list`，因为本工作站刚启动的回合可能尚未进入本地通知缓存；若发现本工作站可 steer 的 `inProgress` 回合，立即调用 `turn/steer`。只有权威列表仍无活动回合时，才将其视为另一 Codex 实例并转换为脱敏用户提示。不得重试、换 turn 或伪造队列接管。Android 保留草稿；独立启动的 app-server 无法响应另一 Codex 桌面进程拥有的交互。
 
 Android 设置使用独立 SettingsPage 模块：连接摘要、设备偏好分组、分区说明、≥48dp目标、居中最大720dp。主题立即应用并保存；连接编辑使用原有安全存储和未保存确认；交互秘密只驻留内存。
 

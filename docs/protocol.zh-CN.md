@@ -86,7 +86,7 @@ commandExecution/fileChange/requestApproval 显示命令、目录、原因或修
 
 普通消息只串行同一线程的短 RPC 提交，上一条 RPC 完成即提交下一条，不等待回合结束、不建立本地任务审批或回合队列。工作站当前缓存的 turn 为 `inProgress` 时必须直接 `turn/steer`；不得先 `thread/resume`。不存在活动 turn 时才 `thread/resume`，resume 后若返回活动 turn 改用 steer，否则 `turn/start`。同一工作站的连续消息由官方 steer 接收并关联同一 turn。
 
-`thread/resume` 的官方 `already has an active writer` 失败不是可重试传输错误：它说明另一 Codex 实例持有会话写入权。工作站必须将其转换为固定的脱敏失败提示，不回传 threadId、原始 app-server 文本或其他实例信息；不得开始新 turn、重新 resume、排入本地队列或自动重试。手机保留草稿并结束当前 requestId；用户可在原实例结束会话后手动重新提交。其他发送失败仍与其 requestId 关联。Android 连续消息保留最新请求的展示，旧回执不能清除新草稿。
+`thread/resume` 的官方 `already has an active writer` 失败先触发一次同线程 `thread/turns/list` 权威读取：若返回当前工作站可 steer 的 `inProgress` 回合，工作站必须改用 `turn/steer`，解决本地通知缓存尚未更新造成的自有回合误判。权威读取仍无活动回合时，才说明另一 Codex 实例持有写入权，并转换为固定的脱敏失败提示；不得回传 threadId、原始 app-server 文本或其他实例信息，不得开始新 turn、重新 resume、排入本地队列或自动重试。手机保留草稿并结束当前 requestId；其他发送失败仍与其 requestId 关联。
 
 筛选顺序为全部、进行中、已完成、失败、待确认。待处理交互优先于运行态；明确失败、官方当前活动、明确完成和证据过期按状态规则投影。运行证据不足归 needs_action；官方 Goal 的 active/paused/blocked 等属于输入域，转换成四种展示状态不是保留旧客户端协议。
 

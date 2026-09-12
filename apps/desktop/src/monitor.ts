@@ -152,8 +152,16 @@ export class Monitor {
       // The app-server allows steer only for the turn owned by this workstation.
       // Do not resume again while that turn is live: resume competes for its writer.
       if (!(current?.id && current.status === "inProgress")) {
-        await this.#server.resumeThread(threadId);
-        current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
+        try {
+          await this.#server.resumeThread(threadId);
+          current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
+        } catch (error) {
+          if (!isActiveWriterError(error)) throw error;
+          // A just-started local turn may not have reached the notification cache yet.
+          // Re-read the authoritative turn list once before classifying ownership.
+          current = await this.#server.recoverActiveTurn(threadId);
+          if (!current?.id || !this.#server.ownsTurn(threadId, current.id)) throw error;
+        }
       }
       const response = asRecord(current?.id && current.status === "inProgress"
         ? await this.#server.steerTurn(threadId, current.id, text.trim())
