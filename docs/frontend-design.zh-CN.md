@@ -18,7 +18,7 @@
 
 ## 1. 权威顺序与实施范围
 
-Android 网络恢复已实现并通过模拟器验收，发布候选为 Android 2.0.12（versionCode 15）。详细生命周期、超时与恢复合同见 [Android 网络恢复设计](android-network-recovery.zh-CN.md)。
+Android 网络恢复、通知快照去重和任务首页下拉刷新已实现，当前版本 Android 2.0.14（versionCode 17）。详细生命周期、超时与恢复合同见 [Android 网络恢复设计](android-network-recovery.zh-CN.md)。
 
 Windows是原生框架的Electron托盘应用；Android为Compose应用；无独立Web后台、macOS或iOS客户端。桌面默认窗口1100×760，最小430×600；430–839宽使用单栏，保留小窗口监控用途。关闭窗口保留托盘；只有托盘“退出”停止采集。
 

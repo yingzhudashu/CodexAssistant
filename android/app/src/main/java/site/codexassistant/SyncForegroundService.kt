@@ -18,6 +18,13 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 
+private data class NotificationSnapshot(val connected: Boolean, val running: Int, val needsAction: Int)
+private fun notificationSnapshot(state: TaskState) = NotificationSnapshot(
+    connected = state.connected,
+    running = state.tasks.count { it.status == "running" },
+    needsAction = state.tasks.count { it.status == "needs_action" },
+)
+
 /**
  * Android 不依赖厂商推送：以前台服务保持唯一 WebSocket，
  * 并在任务状态或当前步骤变化时更新常驻通知，同时发出一次简短本地通知。
@@ -28,6 +35,8 @@ class SyncForegroundService : Service() {
     private var previous = emptyMap<String, TaskSnapshot>()
     private val notices = TaskNotices()
     private var wasConnected = false
+    private var lastNotificationSnapshot: NotificationSnapshot? = null
+    private var notificationJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -50,13 +59,22 @@ class SyncForegroundService : Service() {
                 notices.retain(current.keys)
                 wasConnected = state.connected
                 previous = current
-                val summary = current.values.count { it.status == "running" }
-                updateNotification(
-                    when {
-                        state.connected -> "同步中 · $summary 个进行中任务"
-                        else -> connectionSummary(state)
-                    },
-                )
+                val snapshot = notificationSnapshot(state)
+                if (snapshot != lastNotificationSnapshot) {
+                    notificationJob?.cancel()
+                    notificationJob = scope.launch {
+                        kotlinx.coroutines.delay(200)
+                        if (snapshot != lastNotificationSnapshot) {
+                            lastNotificationSnapshot = snapshot
+                            updateNotification(
+                                when {
+                                    state.connected -> "同步中 · ${snapshot.running} 个进行中任务"
+                                    else -> connectionSummary(state)
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -76,6 +94,7 @@ class SyncForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        notificationJob?.cancel()
         collectJob?.cancel()
         scope.cancel()
         (application as CodexAssistantApplication).sync.serviceStopped(this)

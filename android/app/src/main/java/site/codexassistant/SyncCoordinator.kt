@@ -14,6 +14,7 @@ class SyncCoordinator(context: Context) {
     private val connectivity=appContext.getSystemService(ConnectivityManager::class.java)
     private val scope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
     private val mutableState=MutableStateFlow(TaskState())
+    private val traceLogger=TraceLogger()
     private var job:Job?=null
     @Volatile private var repository:TaskRepository?=null
     private var visible=false
@@ -25,6 +26,7 @@ class SyncCoordinator(context: Context) {
     fun state():StateFlow<TaskState> = mutableState.asStateFlow()
 
     @Synchronized fun foreground() {
+        traceLogger.event("android.lifecycle.foreground")
         val returning=hasBeenForeground && !visible
         visible=true
         hasBeenForeground=true
@@ -33,16 +35,19 @@ class SyncCoordinator(context: Context) {
     }
     @Synchronized fun background(changingConfiguration:Boolean) {
         if(changingConfiguration) return
+        traceLogger.event("android.lifecycle.background")
         visible=false
         stopIfUnowned()
     }
     @Synchronized fun serviceStarted(owner:Any) {
+        traceLogger.event("android.service.started")
         service=owner;background="running"
         mutableState.value=mutableState.value.copy(backgroundSyncStatus=background)
         start()
     }
     @Synchronized fun serviceStopped(owner:Any,unavailable:Boolean=false) {
         if(service!==owner) return
+        traceLogger.event("android.service.stopped")
         service=null;background=if(unavailable) "unavailable" else "stopped"
         mutableState.value=mutableState.value.copy(backgroundSyncStatus=background)
         stopIfUnowned()
@@ -111,4 +116,12 @@ class SyncCoordinator(context: Context) {
     fun requestDetail(threadId:String,cursor:String?=null):String = repository?.requestDetail(threadId,cursor) ?: error("连接不可用")
     fun sendMessage(threadId:String,text:String):String = repository?.sendMessage(threadId,text) ?: error("连接不可用")
     fun submitInteraction(requestId:String,threadId:String,value:kotlinx.serialization.json.JsonElement):Boolean = repository?.submitInteraction(requestId,threadId,value)==true
+    @Synchronized fun refreshNow(): Boolean {
+        traceLogger.event("android.refresh.manual")
+        val active = repository ?: return false
+        mutableState.value = mutableState.value.copy(isRefreshing = true, refreshError = null)
+        val accepted = active.refreshNow()
+        if (!accepted) mutableState.value = mutableState.value.copy(isRefreshing = false, refreshError = "同步尚未启动，请稍后重试")
+        return accepted
+    }
 }

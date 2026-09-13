@@ -1,6 +1,6 @@
 # Android 后台同步与网络恢复设计
 
-状态：已实现并完成模拟器验收，待发布 Android 2.0.12（versionCode 15）。本修订针对 Android 2.0.11 的后台返回离线问题；Windows 2.0.13、业务协议 `codex-assistant.v3` 和 SQLite schema 6 不变。本文是连接恢复的详细合同，协议字段以 protocol.zh-CN.md 为准。
+状态：已实现并完成模拟器验收，当前 Android 2.0.14（versionCode 17）、Windows 2.0.15；业务协议 `codex-assistant.v3` 和 SQLite schema 6 不变。本文同时约束连接恢复、通知同步和任务首页下拉刷新，协议字段以 protocol.zh-CN.md 为准。
 
 ## 问题证据与目标
 
