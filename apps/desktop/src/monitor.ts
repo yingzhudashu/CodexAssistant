@@ -10,6 +10,7 @@ import { deriveTaskStatus, fingerprint, normalizeAction, normalizeActiveFlags, n
 import { TraceLogger, childTrace, newTraceContext, traceparent } from "./trace.js";
 
 import { LifecycleReader, type Lifecycle } from "./lifecycle.js";
+import { CodexDesktopHost } from "./codex-host.js";
 
 type PendingEvent = IngestEvent & { fingerprint: string };
 type StoredOutbox = { deviceId: string; nextSequence: number; events: PendingEvent[]; fingerprints: Record<string, string> };
@@ -21,12 +22,21 @@ export const IN_PROGRESS_ITEM_MAX_AGE_MS = 6 * 60 * 60_000;
 const MAX_OUTBOX_EVENTS = 5_000;
 const MAX_FINGERPRINTS = 10_000;
 const RPC_CONCURRENCY = 8;
-export const ACTIVE_WRITER_MESSAGE = "此会话正由另一 Codex 实例处理，手机无法接管。请在该 Codex 实例中继续；其结束后可重新发送。";
+export const DESKTOP_HOST_UNAVAILABLE_MESSAGE = "工作站 Codex Desktop 未连接，请打开并保持 Codex Desktop 运行后重试";
+export const DESKTOP_SEND_REJECTED_MESSAGE = "Codex Desktop 未接受此消息，请稍后重试";
+export const SEND_FAILED_MESSAGE = "结果尚未确认，请读取回合摘要核实。消息不会自动重发。";
 export type MonitorStatus = "connecting" | "syncing" | "connected" | "offline";
 const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
 
-function isActiveWriterError(error: unknown): boolean {
-  return error instanceof Error && /already has an active writer/i.test(error.message);
+type DesktopHost = { sendMessage(threadId: string, text: string): Promise<void>; close?(): void };
+
+function publicSendError(error: unknown): string {
+  if (error instanceof Error && error.message.startsWith("CODEX_DESKTOP_HOST_UNAVAILABLE")) return DESKTOP_HOST_UNAVAILABLE_MESSAGE;
+  if (error instanceof Error && error.message.startsWith("CODEX_DESKTOP_SEND_REJECTED")) return DESKTOP_SEND_REJECTED_MESSAGE;
+  if (error instanceof Error && error.message === "CODEX_DESKTOP_HOST_AMBIGUOUS") return "检测到多个 Codex Desktop，请只保留目标实例后重试";
+  if (error instanceof Error && [DESKTOP_HOST_UNAVAILABLE_MESSAGE, DESKTOP_SEND_REJECTED_MESSAGE].includes(error.message)) return error.message;
+  if (error instanceof Error && error.message === "检测到多个 Codex Desktop，请只保留目标实例后重试") return error.message;
+  return SEND_FAILED_MESSAGE;
 }
 
 async function mapLimit<T, R>(values: T[], limit: number, worker: (value: T) => Promise<R>): Promise<R[]> {
@@ -45,6 +55,7 @@ async function mapLimit<T, R>(values: T[], limit: number, worker: (value: T) => 
 
 export class Monitor {
   readonly #server: CodexAppServer;
+  readonly #desktopHost: DesktopHost;
   readonly #statePath: string;
   readonly #apiUrl: string;
   readonly #token: string;
@@ -64,13 +75,12 @@ export class Monitor {
   #traceBuffer: TraceSpan[] = [];
   #controlSocket?: WebSocket;
   #controlConnected = false;
-  #pendingControl = new Map<string, { threadId: string; turnId?: string }>();
-  #sendRpcs = new Map<string, Promise<{ status: string; turnId?: string }>>();
+  #sendRpcs = new Map<string, Promise<{ status: "started" }>>();
   #interactions = new Map<string, PendingInteraction>();
   #interactionResults = new Map<string, InteractionResult>();
   #stopping = false;
 
-  private constructor(input: { statePath: string; apiUrl: string; token: string; deviceId: string; outbox: StoredOutbox; onTasks: (tasks: TaskSnapshot[]) => void; onStatus: (status: MonitorStatus) => void }) {
+  private constructor(input: { statePath: string; apiUrl: string; token: string; deviceId: string; outbox: StoredOutbox; onTasks: (tasks: TaskSnapshot[]) => void; onStatus: (status: MonitorStatus) => void; desktopHost?: DesktopHost }) {
     this.#statePath = input.statePath;
     this.#apiUrl = input.apiUrl.replace(/\/$/, "");
     this.#token = input.token;
@@ -78,6 +88,7 @@ export class Monitor {
     this.#outbox = input.outbox;
     this.#onTasks = input.onTasks;
     this.#onStatus = input.onStatus;
+    this.#desktopHost = input.desktopHost ?? new CodexDesktopHost();
     this.#traceLogger = new TraceLogger(`${input.statePath}.trace.jsonl`);
     this.#server = new CodexAppServer({
       onSpan: (span) => this.#recordSpan(span),
@@ -90,7 +101,7 @@ export class Monitor {
     });
   }
 
-  static async create(options: { stateDirectory: string; apiUrl: string; token: string; deviceId: string; onTasks: (tasks: TaskSnapshot[]) => void; onStatus?: (status: MonitorStatus) => void }): Promise<Monitor> {
+  static async create(options: { stateDirectory: string; apiUrl: string; token: string; deviceId: string; onTasks: (tasks: TaskSnapshot[]) => void; onStatus?: (status: MonitorStatus) => void; desktopHost?: DesktopHost }): Promise<Monitor> {
     const path = join(options.stateDirectory, "outbox.json");
     let outbox: StoredOutbox = { deviceId: options.deviceId, nextSequence: 1, events: [], fingerprints: {} };
     try { outbox = JSON.parse(await readFile(path, "utf8")) as StoredOutbox; }
@@ -108,7 +119,7 @@ export class Monitor {
       if (!parseStrictEvent(wire) || typeof event.fingerprint !== "string") throw new Error("OUTBOX_INVALID");
     }
     await mkdir(options.stateDirectory, { recursive: true });
-    return new Monitor({ statePath: path, apiUrl: options.apiUrl, token: options.token, deviceId: options.deviceId, outbox, onTasks: options.onTasks, onStatus: options.onStatus ?? (() => undefined) });
+    return new Monitor({ statePath: path, apiUrl: options.apiUrl, token: options.token, deviceId: options.deviceId, outbox, onTasks: options.onTasks, onStatus: options.onStatus ?? (() => undefined), desktopHost: options.desktopHost });
   }
 
   async start(): Promise<void> {
@@ -125,6 +136,7 @@ export class Monitor {
     if (this.#timer) clearInterval(this.#timer);
     await this.#pollFinished;
     await Promise.allSettled([...this.#sendRpcs.values()]);
+    this.#desktopHost.close?.();
     await this.#server.stop();
     this.#controlSocket?.close();
     this.#controlSocket = undefined;
@@ -140,41 +152,23 @@ export class Monitor {
 
   get workstationReady(): boolean { return this.#server.ready; }
 
-  async sendMessage(threadId: string, text: string): Promise<{ status: string; turnId?: string }> {
+  async sendMessage(threadId: string, text: string): Promise<{ status: "started" }> {
     if (this.#stopping) throw new Error("MONITOR_STOPPED");
     if (!text.trim() || text.length > 20_000) throw new Error("MESSAGE_INVALID");
     const previous = this.#sendRpcs.get(threadId);
     const pending = (async () => {
       await previous?.catch(() => undefined);
       if (this.#stopping) throw new Error("MONITOR_STOPPED");
-      await this.#server.start();
-      let current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
-      // The app-server allows steer only for the turn owned by this workstation.
-      // Do not resume again while that turn is live: resume competes for its writer.
-      if (!(current?.id && current.status === "inProgress")) {
-        try {
-          await this.#server.resumeThread(threadId);
-          current = this.#server.latestTurn(threadId) as { id?: string; status?: string } | undefined;
-        } catch (error) {
-          if (!isActiveWriterError(error)) throw error;
-          // A just-started local turn may not have reached the notification cache yet.
-          // Re-read the authoritative turn list once before classifying ownership.
-          current = await this.#server.recoverActiveTurn(threadId);
-          if (!current?.id || !this.#server.ownsTurn(threadId, current.id)) throw error;
-        }
-      }
-      const response = asRecord(current?.id && current.status === "inProgress"
-        ? await this.#server.steerTurn(threadId, current.id, text.trim())
-        : await this.#server.startTurn(threadId, text.trim()));
-      const turnId = asRecord(response.turn).id ?? response.turnId ?? current?.id;
-      return { status: "started", ...(typeof turnId === "string" ? { turnId } : {}) };
+      // Desktop owns the writer for Desktop-created threads. Route mobile input
+      // through its official app-tools host instead of a second app-server.
+      try { await this.#desktopHost.sendMessage(threadId, text.trim()); }
+      catch (error) { throw new Error(publicSendError(error)); }
+      return { status: "started" as const };
     })();
     this.#sendRpcs.set(threadId, pending);
     try { return await pending; }
-    catch (error) { if (isActiveWriterError(error)) throw new Error(ACTIVE_WRITER_MESSAGE); throw error; }
     finally { if (this.#sendRpcs.get(threadId) === pending) this.#sendRpcs.delete(threadId); }
   }
-
   get interactions(): InteractionRequest[] { return [...this.#interactions.values()].map(p => p.request); }
 
   submitInteraction(requestId: string, threadId: string, value: unknown): InteractionResult {
@@ -223,8 +217,7 @@ export class Monitor {
         const message = JSON.parse(String(raw)) as Record<string, unknown>;
         if (message.type === "authenticated") { socket.send(JSON.stringify({ type: "subscribe", protocolVersion: "codex-assistant.v3", after: 0 })); socket.send(JSON.stringify({ type: "role", role: "desktop" })); this.#controlConnected = true; for (const pending of this.#interactions.values()) this.#sendControl(pending.request); return; }
         if (message.type === "send" && typeof message.requestId === "string" && typeof message.threadId === "string" && typeof message.text === "string") {
-          this.#pendingControl.set(message.requestId, { threadId: message.threadId });
-          void this.sendMessage(message.threadId, message.text).then((accepted) => { const pending = this.#pendingControl.get(message.requestId as string); if (pending) pending.turnId = accepted.turnId; socket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v3", requestId: message.requestId, threadId: message.threadId, status: "started" })); }).catch((error: unknown) => { this.#pendingControl.delete(message.requestId as string); socket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v3", requestId: message.requestId, threadId: message.threadId, status: "failed", error: error instanceof Error ? error.message.slice(0, 500) : "SEND_FAILED" })); });
+          void this.sendMessage(message.threadId, message.text).then(() => { if (socket.readyState !== WebSocket.OPEN) return; socket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v3", requestId: message.requestId, threadId: message.threadId, status: "started" })); }).catch((error: unknown) => { if (socket.readyState !== WebSocket.OPEN) return; socket.send(JSON.stringify({ type: "result", protocolVersion: "codex-assistant.v3", requestId: message.requestId, threadId: message.threadId, status: "failed", error: publicSendError(error) })); });
           return;
         }
         if (message.type === "detail" && typeof message.requestId === "string" && typeof message.threadId === "string") {
@@ -235,7 +228,7 @@ export class Monitor {
         }
       } catch { /* invalid control frames are ignored */ }
     });
-    socket.on("close", () => { if (this.#controlSocket === socket) { this.#controlSocket = undefined; this.#controlConnected = false; this.#pendingControl.clear(); } });
+    socket.on("close", () => { if (this.#controlSocket === socket) { this.#controlSocket = undefined; this.#controlConnected = false; } });
     socket.on("error", () => undefined);
   }
 
@@ -252,15 +245,8 @@ export class Monitor {
     if (notification.method === "serverRequest/resolved") { this.#expireInteractions(threadId, params.requestId); return; }
     const terminal = notification.method === "turn/completed";
     if (!threadId) return;
-    const turn = asRecord(params.turn);
     if (terminal) this.#expireInteractions(threadId);
-    const delta = typeof params.delta === "string" ? params.delta : undefined;
-    for (const [requestId, pending] of this.#pendingControl) {
-      if (pending.threadId !== threadId || !pending.turnId || (turn.id && pending.turnId !== turn.id)) continue;
-      const status = terminal ? (turn.status === "completed" && !turn.error ? "completed" : "failed") : delta ? "streaming" : "started";
-      this.#sendControl({ type: "result", protocolVersion: "codex-assistant.v3", requestId, threadId, status, ...(delta ? { text: delta.slice(0, 20_000) } : {}) });
-      if (terminal) this.#pendingControl.delete(requestId);
-    }
+    // Desktop receipts carry no turn identity; independent notifications cannot complete a send.
   }
 
   async #poll(): Promise<void> {

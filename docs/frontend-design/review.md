@@ -26,4 +26,10 @@ Android 已完成手机/平板、深浅主题、系统栏、200% 字号、连接
 
 后续验收已跑通官方 app-server 真实选项→Android 提交→官方回合完成；修复前台服务超时与回前台恢复、通知计数和锁屏 publicVersion、慢订阅者重连、长中文消息、Windows 版本比较、队列损坏停止及退出竞态。持续同步与物理设备结果以验收文档为准。
 
-2026-09-11 发送链路复审：截图中的 `already has an active writer` 证明现有“每次发送先 resume”与官方单写入者模型冲突。设计现改为已知本工作站 inProgress 回合直接 steer；仅无活动回合 resume 后 start。另一实例持有写入权时固定显示脱敏归属提示，保留草稿，不自动重试、接管、换 turn 或建立应用队列。前后端协议字段无需变化；验证须覆盖 direct-steer 路径和 active-writer 失败路径，Android 不得显示原始 threadId。
+2026-09-11 的自有回合 steer 验收不足以证明 Desktop 会话可写；该设计已被现场失败证据否定。2026-09-13 修订见 [Desktop 消息合同](../desktop-message-routing.zh-CN.md)，发布门必须包含真实宿主持有会话的发送证据。
+
+## 2026-09-13 Desktop 发送修订验收
+
+发送合同、架构、协议、CA-06/CA-07 和消息回执字段逐项交叉核对；删除 resume/steer 写入路径与虚假 streaming/completed 关联。检查正常、拒绝、无宿主、多宿主、断线、未知结果、并发提交和迟到回执；运行回执不再锁住手机发送。重绘13页29交互57图，静态结构、图片与边界验证0问题，人工抽查预览及实际 Windows/Android 发送界面。最终协议为 codex-assistant.v3 / schema 6，消息回执收窄为 started/failed。
+
+真实 Desktop 活动会话已收到直接宿主验收标记，以及 Android 模拟器经实际服务端/Monitor发送的两条标记；宿主接受耗时882ms、84ms。合成拒绝保留草稿，延迟回执保留编辑中的新内容。Node 13文件58项通过，Android Debug单元测试/构建/lint通过（0错误17警告），Release签名通过，Windows界面8项检查通过。宿主接口版本依赖、无独立审批所有权和无真机的限制继续保留；不将这次发送验收解释为所有Desktop选项均可手机回答。

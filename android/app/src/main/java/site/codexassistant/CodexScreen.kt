@@ -169,9 +169,10 @@ internal fun openDownload(context:android.content.Context,url:String?) {
     var tab by rememberSaveable(task.id){mutableIntStateOf(0)}
     var draft by rememberSaveable(task.id){mutableStateOf("")}
     var sentRequestId by rememberSaveable(task.id){mutableStateOf<String?>(null)}
+    var submittedDraft by rememberSaveable(task.id){mutableStateOf<String?>(null)}
     val result=state.results[task.id]
     val detail=state.details[task.id]
-    LaunchedEffect(result?.requestId,result?.status) { if(result?.status=="started" && result.requestId==sentRequestId){draft="";sentRequestId=null} }
+    LaunchedEffect(result?.requestId,result?.status) { if(result?.status=="started" && result.requestId==sentRequestId){if(draft==submittedDraft)draft="";sentRequestId=null;submittedDraft=null} }
     Column(modifier.fillMaxHeight().imePadding().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         TextButton(close){Text("返回任务列表")}
         Text(task.title,style=MaterialTheme.typography.headlineSmall)
@@ -208,8 +209,8 @@ internal fun openDownload(context:android.content.Context,url:String?) {
                 item{Text("消息直接发送至对应 Codex 会话。运行期间可继续发送；选择请求会显示在上方。")}
                 if(!state.connected) item{Text("连接不可用，草稿保留，恢复连接后可发送。",color=MaterialTheme.colorScheme.error)}
                 item{OutlinedTextField(draft,{draft=it},Modifier.fillMaxWidth(),label={Text("消息")},minLines=3,maxLines=8,supportingText={Text("${draft.length} / 20000")},isError=draft.length>20000)}
-                item{Button({sentRequestId=vm.send(task.id,draft)},enabled=state.connected && draft.trim().length in 1..20000,modifier=Modifier.fillMaxWidth()){Text("发送消息")}}
-                result?.let{item{Text(it.error?:it.text?:mapOf("started" to "已接受，回合仍在执行","streaming" to "正在生成","completed" to "回合已完成","failed" to "发送失败")[it.status]?:it.status,color=if(it.status=="failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)}}
+                item{Button({val id=vm.send(task.id,draft);if(id!=null){sentRequestId=id;submittedDraft=draft}},enabled=state.connected && task.id !in state.sending && draft.trim().length in 1..20000,modifier=Modifier.fillMaxWidth()){Text("发送消息")}}
+                result?.let{item{Text(it.error?:mapOf("started" to "Codex Desktop 已接受消息，可继续发送；进展请查看回合摘要","failed" to "发送未确认")[it.status]?:it.status,color=if(it.status=="failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)}}
             }
         }
     }

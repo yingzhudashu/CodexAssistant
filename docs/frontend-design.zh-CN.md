@@ -7,7 +7,7 @@
 ### 2026-09-10 修订（导航、消息与状态统一）
 
 1. Android 一级导航仅显示在任务首页与设置首页。任务详情、连接与诊断、外观、通知、关于与更新及连接编辑均不显示底部导航/Navigation Rail。键盘打开时一级导航隐藏。返回顺序为键盘 → 弹层 → 当前页面父页；设置子页 → 设置首页 → 任务首页。连接编辑取消/返回恢复编辑前的页面，未保存变更仍须确认。
-2. Windows 本机发送链路为 renderer → IPC task.send → 本机 Codex app-server，不绕经云端。使用 workstation.status.ready（initialize 回执及 initialized 通知后为 true，进程退出/停止为 false）判断本机就绪。sync.status 的 connecting/syncing/connected/offline 只表示采集同步，不作为本机发送的禁用条件；采集/上传中仍可发送。未就绪显示“本机 Codex 服务尚未就绪。草稿已保留，就绪后请手动发送。”，就绪后不自动提交。
+2. Windows 本机发送链路为 renderer → IPC task.send → Monitor → Codex Desktop 宿主，不绕经云端。使用 workstation.status.ready（initialize 回执及 initialized 通知后为 true，进程退出/停止为 false）判断本机就绪。sync.status 的 connecting/syncing/connected/offline 只表示采集同步，不作为本机发送的禁用条件；采集/上传中仍可发送。未就绪显示“本机 Codex 服务尚未就绪。草稿已保留，就绪后请手动发送。”，就绪后不自动提交。
 3. Windows 托盘与窗口图标读取随安装包分发的 tray.ico，包含 16/20/24/32/48/256px 图层。不得使用 SVG data URL；构建校验 ICO 头，运行时检查 nativeImage 非空。关闭窗口保留托盘，双击恢复，右键退出。
 4. Windows 和 Android 使用同一筛选顺序及中文标签：全部、running 进行中、completed 已完成、failed 失败、needs_action 待确认。连接、freshness 和回合状态不属于任务状态。
 
@@ -26,7 +26,7 @@ Windows是原生框架的Electron托盘应用；Android为Compose应用；无独
 
 ## 2. 现状证据与设计差额
 
-本轮统一四种任务状态、消息直达和动态交互表单。服务端保留 started/streaming 路由至目标回合结束；交互以 requestId+threadId 校验并保证终态幂等。官方用户输入保留所有问题一次提交，MCP 枚举表单支持多选。独立 app-server 无法替其他进程应答请求，此限制明确保留。
+本轮统一四种任务状态、消息直达和动态交互表单。服务端在 started 或 failed 回执后结束发送路由；交互以 requestId+threadId 校验并保证终态幂等。官方用户输入保留所有问题一次提交，MCP 枚举表单支持多选。独立 app-server 无法替其他进程应答请求，此限制明确保留。
 
 ## 3. 视觉、布局与组件规范
 
@@ -79,13 +79,13 @@ G02：普通消息立即提交且允许连续发送；交互表单提交时禁�
 
 G03：关闭表单/切换账户前如有未保存修改，弹“放弃未保存内容？”；默认焦点“继续编辑”，另有“放弃并离开”。普通页返回不弹确认。关闭模态层先返回其父层，焦点恢复到触发控件；正在提交时可离开但不假称操作被取消，后台结果按资源ID归并。跨账号迟到响应一律丢弃。
 
-G04：表单字段规范是UI约束，不能放宽协议上限。字符串按Unicode字符校验；仅在提交时去除首尾空白，正文保留换行与内部空白。字段失焦校验；提交先定位第一处错误；服务端422/400映射到字段，未能映射的显示表单顶部。未在字段表中列出的字段不允许由设计实现者自行新增。
+G04：表单字段规范是UI约束，不能放宽协议上限。消息长度按UTF-16代码单元校验；仅在提交时去除首尾空白，正文保留换行与内部空白。字段失焦校验；提交先定位第一处错误；服务端422/400映射到字段，未能映射的显示表单顶部。未在字段表中列出的字段不允许由设计实现者自行新增。
 
 G05：Web/Windows Enter发送、Shift+Enter换行，输入法正在组合（isComposing）时Enter只确认候选；Android多行IME默认换行，使用显式发送按钮。空白正文禁发。离线保留当前进程草稿但禁发；恢复连接后不自动发送。消息发送与文件上传分开反馈。
 
 G06：用户距底部≤80px时新增消息跟随；向上滚动超过80px暂停跟随，显示“查看新消息”；加载历史保留首个可见消息ID与偏移。打开/关闭检查器不重置会话。草稿按账号+服务地址+会话ID隔离，只存内存；跨进程不承诺恢复。重命名/主题/导航展开状态允许本机偏好保存，不保存Token或正文到普通偏好存储。
 
-G07：401先结束当前订阅，显示重新登录；403解释权限不足且不可通过按钮重试升级权限；404显示资源已不存在并返回列表；409重新获取最新状态并展示差异；429依据Retry-After倒计时；5xx允许手动重试读取。错误Toast不替代持久错误区。认证失败不循环重连。UI 15秒未确认提示“仍在等待”；60秒转“结果尚未确认”并允许查询，不能当作服务端已失败。
+G07：401先结束当前订阅，显示重新登录；403解释权限不足且不可通过按钮重试升级权限；404显示资源已不存在并返回列表；409重新获取最新状态并展示差异；429依据Retry-After倒计时；5xx允许手动重试读取。错误Toast不替代持久错误区。认证失败不循环重连。普通发送由宿主调用10秒期限控制；Android在120秒仍未获回执时提示“结果尚未确认”，不能当作回合失败。详情读取期限30秒。
 
 G08：时间以协议值存储（ISO UTC或epoch毫秒依本项目），显示到本地时区；列表用相对时间，详情显示YYYY-MM-DD HH:mm:ss UTC±hh:mm。日期边界采用用户选择时区，不固定+8。所有示例名/时间/文件为合成数据。
 
@@ -165,7 +165,7 @@ Android 设置页：居中最大720dp、外边距24dp；顶部连接卡片，设
 |连接|Windows connecting/syncing/connected/offline；Android connecting/authenticating/subscribing/connected/reconnecting/offline/auth_failed/protocol_error/not_configured；两端不合并状态机|
 |计划|pending待开始、in_progress执行中、completed完成、failed失败；进度=completed数量/plan长度；无计划不显示0/0、百分比或伪步骤|
 |按需详情|用户打开详情触发一次detail，limit=20；cursor只从上一页返回值读取；有cursor才显示“加载更早回合”，每次点击加载一页；关闭后丢弃回合正文缓存，不在云端保存整个历史|
-|消息|send.text去首尾空白后1–20000字符；requestId为新UUID；started只表示已接受，streaming追加文本，completed才表示该turn完成；failed显示明确错误；每次明确发送产生新requestId，旧回执不清除新草稿|
+|消息|send.text去首尾空白后1–20000字符；requestId为新UUID；started只表示Desktop已接受并结束本次发送；failed表示未获得成功确认，保留草稿，不自动重发；每次明确发送产生新requestId，旧回执不清除新草稿|
 |非结构化回合|turns为unknown[]，只提取id/status/startedAt/completedAt和type为用户消息/助手消息的可读text；其他对象显示“此内容请在工作站查看”，不得直接JSON.stringify展示|
 |身份|服务使用共享Token而不是多用户隔离；界面不伪造不同用户或设备角色；Android详情/发送由云端转发至已连接桌面控制器，不可达时说明“工作站未连接”；Windows通过本机IPC并按本机ready提示，任务快照仍可查看|
 |Windows本机控制|workstation.status.ready 独立于 sync.status；ready=true且正文有效、正文有效即可发送；Android仍须已完成云端订阅，工作站不可达由服务端回执提示|
@@ -538,15 +538,15 @@ Android 设置页：居中最大720dp、外边距24dp；顶部连接卡片，设
 
 **布局**：聊天模板：顶部会话标题与最多2条上下文信息；用户消息右对齐、助手回答左对齐；消息内容最大800宽，手机铺满减32；正文独立滚动，80高输入面板固定在操作栏上方；其余字段在消息关联详情中展开。空态不生成假历史消息。
 
-**数据绑定**：`apps/desktop/src/renderer/workspace.js`。task.send / ClientSendMessage；本工作站缓存回合为inProgress时直接steer；无活动回合才resume，resume后活动则steer，否则start。
+**数据绑定**：`apps/desktop/src/renderer/workspace.js`。task.send / ClientSendMessage → Monitor → Codex Desktop send_message_to_thread；独立 app-server 只读。
 
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
 |目标任务|record|同步协调器|只读threadId关联的标题，禁止自动切换目标|
 |消息内容|textarea|请补充断线恢复的检查结果。|1–20000字符；只去首尾空白；保留正文换行|
-|发送状态|record|尚未发送|本地idle→submitting→accepted，之后运行状态来自实际turn事件；另一实例持有写入权时为本次失败，不显示原始thread或app-server错误|
+|发送状态|record|尚未发送|idle→submitting→accepted/failed；started仅表示消息被Desktop接受，立即结束等待。会话状态单独刷新。|
 
-**页面规则**：不提供不存在的停止/远程批准按钮；waitingOnApproval只引导工作站处理。发送回执不是任务完成；当前端未实现streaming时也必须展示已接受而非生成假回答。已知本工作站运行中的回合直接进入Codex原生steer，不显示人为队列。若另一Codex实例持有写入权，显示“此会话正由另一Codex实例处理，手机无法接管。请在该Codex实例中继续；其结束后可重新发送。”，保留草稿并结束发送；不得显示原始already has an active writer、threadId或“正在排队”。
+**页面规则**：发送入口以 docs/desktop-message-routing.zh-CN.md 为准；不自行resume、start、steer。不把同线程的独立app-server通知关联到发送请求；started不是任务完成。Desktop自己持有的审批仍需在Desktop处理。
 
 **空态/加载/错误**：首次读取显示“正在加载向工作站发送消息”；成功无记录显示“暂无向工作站发送消息记录”并保留入口操作。失败就地显示错误区；旧数据标“上次同步”；离线远端写操作禁用；本地查看、返回、复制、外观保存和已明确允许的配置保存仍可用。
 
@@ -564,10 +564,10 @@ Android 设置页：居中最大720dp、外边距24dp；顶部连接卡片，设
 |执行类别|write（按G13解释）|
 |事件/调用|`task.send / send(threadId,text,requestId)`|
 |处理中|“发送”禁用并显示“处理中…”；本页对象保留，禁止并发重复提交。|
-|成功|收到started显示“已发送，工作站开始处理”；清空本次草稿并进入CA-07。|
-|失败/重试|失联/超时保留原文，提示“尚未确认是否送达，请刷新回合后决定是否重新发送”；禁止自动重发。另一实例持有写入权时保留原文，显示归属提示；只允许用户在原实例结束后手动再次发送，不尝试接管、换turn或本地排队。|
+|成功|收到started显示“Codex Desktop 已接受消息，可继续发送；进展请查看回合摘要”；清空本次未更改的草稿并恢复发送。|
+|失败/重试|无宿主/多个宿主/拒绝显示固定脱敏错误；超时或断线提示结果尚未确认，保留草稿，禁止自动重发。|
 |返回/取消|返回触发页面，恢复原焦点/滚动；未保存输入按G03确认；在途操作不被伪装取消。|
-|验收|Given 操作前置条件满足；When 当前工作站的同一回合为inProgress后点击发送；Then 只调用steer、不调用resume，收到started。When resume返回active writer；Then 保留草稿、显示归属提示、不泄露原始错误或threadId，且不再发送RPC。另模拟失联、双击、离开页面，核对G02/G03。|
+|验收|真实Desktop持有活动会话时提交消息并核实原文到达；验证连续发送、失败保留草稿、编辑期间旧回执不清空新草稿；丢失回执仅写入一次。|
 
 ![CA-06.I01 操作前、处理中、成功与失败](design-assets/final/CA-06-i01.svg)
 
@@ -607,7 +607,7 @@ Android 设置页：居中最大720dp、外边距24dp；顶部连接卡片，设
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
 |消息回执|record|已接受 · 等待工作站结果|仅started可置已接受|
-|回复|message|已检查两种重连场景，正在汇总。|streaming仅追加delta；completed为目标turn终态|
+|回复|message|已检查两种重连场景，正在汇总。|从按需回合摘要读取真实文本和回合状态；发送回执不提供回复流。|
 |结果状态|record|处理中|超时不转failed；显示结果尚未确认|
 
 **页面规则**：实现差额：路由必须在终态后才删除pending；item.completed不能结束turn。每thread只有一条在途发送；未确认时先读详情再由用户显式发送新消息，不提供自动重放。

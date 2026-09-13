@@ -32,19 +32,22 @@ async function fixture() {
   return { connect, server };
 }
 
-it('keeps routing started, streaming and terminal replies for the same request', async () => {
+it('finishes a send at acceptance and does not overwrite it when the workstation disconnects', async () => {
   const f = await fixture(); const desktop = await f.connect(true); const phone = await f.connect();
   phone.send({ type: 'send', requestId: 'message-1', threadId: 'thread-1', text: 'continue' });
   await vi.waitFor(() => expect(desktop.messages.some(m => m.type === 'send')).toBe(true));
-  for (const status of ['started', 'streaming', 'completed']) desktop.send({ type: 'result', requestId: 'message-1', threadId: 'thread-1', status });
-  await vi.waitFor(() => expect(phone.messages.filter(m => m.type === 'result').map(m => m.status)).toEqual(['started', 'streaming', 'completed']));
+  desktop.send({ type: 'result', requestId: 'message-1', threadId: 'thread-1', status: 'started' });
+  await vi.waitFor(() => expect(phone.messages.filter(m => m.type === 'result')).toHaveLength(1));
+  desktop.socket.close();
+  await vi.waitFor(() => expect(desktop.socket.readyState).toBe(WebSocket.CLOSED));
+  expect(phone.messages.filter(m => m.type === 'result').map(m => m.status)).toEqual(['started']);
 });
 
 it('rejects a cross-thread result instead of delivering it to another conversation', async () => {
   const f = await fixture(); const desktop = await f.connect(true); const phone = await f.connect();
   phone.send({ type: 'send', requestId: 'message-1', threadId: 'thread-1', text: 'continue' });
   await vi.waitFor(() => expect(desktop.messages.some(m => m.type === 'send')).toBe(true));
-  desktop.send({ type: 'result', requestId: 'message-1', threadId: 'different-thread', status: 'completed' });
+  desktop.send({ type: 'result', requestId: 'message-1', threadId: 'different-thread', status: 'started' });
   await vi.waitFor(() => expect(desktop.socket.readyState).not.toBe(WebSocket.OPEN));
   expect(phone.messages.some(m => m.type === 'result' && m.threadId === 'different-thread')).toBe(false);
 });

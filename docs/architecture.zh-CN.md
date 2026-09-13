@@ -1,8 +1,8 @@
 # 架构说明
 
-## Android 网络恢复修订（待确认）
+## Android 网络恢复
 
-本轮设计见 [Android 后台同步与网络恢复](android-network-recovery.zh-CN.md)。这是待确认的目标行为，尚未修改或发布实现。沿用进程唯一 SyncCoordinator 与 TaskRepository，增加 Activity/服务生命周期所有权、默认网络恢复信号、串行连接状态和失效代次保护。前台服务退出不能关闭仍由可见界面使用的连接；恢复网络不在后台自行拉起服务。连接的总握手期限为25秒，onOpen 后至 snapshot 为15秒，以先到者为准；只在 snapshot 后开放发送。服务端仍使用原 auth/subscribe/回放/快照链路，协议和 schema 不变。
+本轮设计见 [Android 后台同步与网络恢复](android-network-recovery.zh-CN.md)。该行为已完成实现，验收证据见验收记录。沿用进程唯一 SyncCoordinator 与 TaskRepository，增加 Activity/服务生命周期所有权、默认网络恢复信号、串行连接状态和失效代次保护。前台服务退出不能关闭仍由可见界面使用的连接；恢复网络不在后台自行拉起服务。连接的总握手期限为25秒，onOpen 后至 snapshot 为15秒，以先到者为准；只在 snapshot 后开放发送。服务端仍使用原 auth/subscribe/回放/快照链路，协议和 schema 不变。
 
 ## 2026-09-10 前端交互修订对应的实现约束
 
@@ -10,7 +10,7 @@
 - Windows renderer 的消息格式化必须在本地完成且先转义原文；表格、代码块、列表和行内公式只能生成安全的展示节点，不新增远程接口或上传正文。布局断点优先保证详情正文和输入区的可用宽高。
 
 - Android 一级导航只存在于任务首页和设置首页。详情页、设置二级页进入独立页面栈；系统返回先退出输入法/弹层，再按二级页 → 设置首页 → 任务首页逐级返回。
-- Windows 本机控制与云端同步分别建模：`workstation.status.ready` 由 app-server initialize/initialized 握手及退出/停止事件决定；`sync.status` 仅表示采集/上传循环。renderer 使用前者判断本机 IPC 发送，不再把 syncing/offline 当作本机不可用。`task.send` 等待唯一启动 Promise；已知本工作站的进行中回合直接 `turn/steer`，不再调用 `thread/resume` 争夺同一写入权；非活动会话才 resume 后 start。Android 仍经云端 WebSocket 转发，不改变服务端鉴权和工作站不可达回执。
+- Windows 本机控制与云端同步分别建模：`workstation.status.ready` 由 app-server initialize/initialized 握手及退出/停止事件决定；`sync.status` 仅表示采集/上传循环。renderer 使用前者判断本机 IPC 发送，不再把 syncing/offline 当作本机不可用。`task.send` 等待唯一启动 Promise，再由 Desktop 宿主接收消息；采集器 ready 不代表发送通道可用，发送失败在本页显示。详见 [发送合同](desktop-message-routing.zh-CN.md)。
 - Windows 托盘资源必须从 `apps/desktop/assets/tray.ico` 读取并通过 `nativeImage.createFromPath` 创建；构建时校验文件存在且为有效 ICO，运行时不得回退到透明占位图或 SVG data URL。
 - 任务状态唯一来源是协议 `TaskStatusSchema` 的四状态：running、needs_action、completed、failed。Android、Windows 的标签、筛选项、通知摘要和空态均由同一固定映射派生，连接状态和 freshness 独立展示。
 
@@ -25,7 +25,7 @@ Fastify 服务端只拥有 CodexAssistant 自己的 SQLite 文件。事件以 `(
 - 协议层：TypeBox 严格校验，所有对象 `additionalProperties: false`。
 - 采集层：仅通过官方 thread/list 返回的 rollout 文件路径增量读取生命周期事件（task_started、task_complete、turn_aborted），不读取 Codex SQLite，不上传原始 JSONL、正文或路径。
 - 脱敏层：路径、密钥样式、标题长度和换行在离开桌面端前处理。
-- 传输层：有效 outbox 持久化待上传事件并在重启后重试；幂等序号防止重复写入。损坏或格式不符的 outbox 当前会被桌面启动逻辑删除重建，不能保证这部分未上传事件可恢复。
+- 传输层：有效 outbox 持久化待上传事件并在重启后重试；幂等序号防止重复写入。损坏或格式不符的 outbox 保留原文件并停止启动，避免重置序号与服务器已有事件冲突；不自动删除、迁移或伪造恢复。
 - 服务层：鉴权、幂等、游标回放、广播、追踪和健康指标。
 - 展示层：任务卡片只消费脱敏快照；连接配置页接收用户输入的 Token 并交给凭据存储。桌面 connection.get 不向 renderer 返回已保存的 Token。
 
@@ -68,9 +68,7 @@ CodexAssistant 是 Codex 的移动伴侣，不重新实现 Codex 能力。Window
 
 Windows `interactions.get` 与 `interaction.submit` 是本机 IPC，使用与 Android 相同的 Monitor 入口；终态结果最多保留1000项。官方进程退出或回合完成触发过期，手机断线不执行回答。工作站连接恢复后重新发布尚未解决的请求。服务端重启无法证明历史提交结果，只返回 expired，不自动重发。
 
-普通消息只串行同线程短暂的 RPC 提交，不等待回合结束。工作站先读取自己已缓存的当前 turn：其为 `inProgress` 时直接调用官方 `turn/steer`；没有活动 turn 时才调用 `thread/resume`，并在 resume 返回活动 turn 时改为 steer，否则调用 `turn/start`。这样本工作站连续手机消息进入 Codex 原生 steer，不会因重复 resume 触发单写入者冲突。CodexAssistant 不建立业务队列或消息审批。
-
-`thread/resume` 返回 `already has an active writer` 时，工作站先对同一线程执行一次权威 `thread/turns/list`，因为本工作站刚启动的回合可能尚未进入本地通知缓存；若发现本工作站可 steer 的 `inProgress` 回合，立即调用 `turn/steer`。只有权威列表仍无活动回合时，才将其视为另一 Codex 实例并转换为脱敏用户提示。不得重试、换 turn 或伪造队列接管。Android 保留草稿；独立启动的 app-server 无法响应另一 Codex 桌面进程拥有的交互。
+普通消息与回执以 [Desktop 会话消息发送合同](desktop-message-routing.zh-CN.md) 为准：由 Desktop 接收目标会话消息，独立 app-server 不再负责消息写入。started 仅表示接受并结束本次发送等待，不能与无关联的回合通知拼接。
 
 Android 设置使用独立 SettingsPage 模块：连接摘要、设备偏好分组、分区说明、≥48dp目标、居中最大720dp。主题立即应用并保存；连接编辑使用原有安全存储和未保存确认；交互秘密只驻留内存。
 

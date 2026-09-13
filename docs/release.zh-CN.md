@@ -1,6 +1,6 @@
 # 安装包与发布
 
-当前源码 Windows 版本为 `2.0.14`，Android 为 `2.0.13`；Android `versionCode=16`，协议固定为 `codex-assistant.v3`。本次修复 Android 前后台切换后的网络恢复、连接代次隔离和后台同步状态，并修复手机消息对工作站活动回合的误判。本轮协议与数据库 schema 均不变。
+当前源码 Windows 版本为 `2.0.15`，Android 为 `2.0.14`；Android `versionCode=17`，协议固定为 `codex-assistant.v3`，schema=6。本次通过 Codex Desktop 宿主发送消息，删除独立 app-server 的写入路径，发送回执仅有 started/failed，收到 started 立即允许下一条消息。三端同步升级，旧 streaming/completed 消息回执与 text 字段删除。详情见 [发送合同](desktop-message-routing.zh-CN.md)。
 
 ## 构建
 
@@ -13,7 +13,7 @@ npm test
 
 Windows 脚本构建 Electron 与 NSIS、计算 SHA-256 并复制到 `artifacts/windows`。当前配置禁用 Authenticode 签名，清单必须如实标记 `NotSigned`；不能声称包具有受信任的发布者签名。NSIS 使用项目图标，Electron 可执行文件资源编辑目前禁用。
 
-若下载运行时的网络不可达，可显式复用项目已经安装的同版本 Electron：先运行 `npm run build`，再在 `apps/desktop` 中执行 `..\..\node_modules\.bin\electron-builder.cmd --win nsis --publish never --config.electronDist=../../node_modules/electron/dist`。执行前核对 `node_modules/electron/dist/version` 与桌面 package.json 中的 Electron 依赖版本一致；不能使用不明来源或不同版本的运行时。
+发布脚本固定复用项目已安装的同版本 Electron，手动复现方式：先运行 `npm run build`，再在 `apps/desktop` 中执行 `..\..\node_modules\.bin\electron-builder.cmd --win nsis --publish never --config.electronDist=../../node_modules/electron/dist`。执行前核对 `node_modules/electron/dist/version` 与桌面 package.json 中的 Electron 依赖版本一致；不能使用不明来源或不同版本的运行时。
 
 Android 脚本执行 `assembleRelease`、启用 R8，使用仓库外 keystore 签名，随后执行 apksigner 验证并计算 SHA-256；产物位于 `artifacts/android`。缺少签名配置直接失败。必须保留同一 keystore 才能覆盖安装，密码不得写进日志或仓库。
 

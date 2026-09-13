@@ -53,9 +53,9 @@ Android 序列化启用 `encodeDefaults=true` 和 `explicitNulls=false`：auth/s
 
 ## 连接状态与边界
 
-Android 正常链路为 connecting → authenticating → subscribing → connected。断开后显示 offline/reconnecting 并按 1 至 6 秒延迟重试；not_configured 表示缺少 Token。auth_failed 与 protocol_error 为不可重试错误，保存配置后重建连接。当前没有独立的系统网络恢复回调，5 秒恢复目标尚未验证。
+Android 正常链路为 connecting → authenticating → subscribing → connected。断开后显示 offline/reconnecting 并按 1 至 6 秒延迟重试；not_configured 表示缺少 Token。auth_failed 与 protocol_error 为不可重试错误，保存配置后重建连接。默认网络恢复回调与前台唤醒已实现，正常可控网络的模拟器恢复测量见验收记录。
 
-待确认的 Android 修订见 [网络恢复合同](android-network-recovery.zh-CN.md)：保留以上线上字段和枚举，在客户端加入网络/前台唤醒；无默认网络暂停重试，有网络按1至6秒退避，仅 snapshot 重置计数。总握手25秒、onOpen至snapshot 15秒期限以先到者为准，超时关闭后重试。auth_failed/protocol_error 不被恢复信号重置。失效连接的任何回调不写状态或游标；重连不自动重发业务写入，服务端不新增请求结果重放保证。5秒仅为正常可控网络的待测验收目标，不是已通过结论。
+Android 实现合同见 [网络恢复合同](android-network-recovery.zh-CN.md)：保留以上线上字段和枚举，在客户端加入网络/前台唤醒；无默认网络暂停重试，有网络按1至6秒退避，仅 snapshot 重置计数。总握手25秒、onOpen至snapshot 15秒期限以先到者为准，超时关闭后重试。auth_failed/protocol_error 不被恢复信号重置。失效连接的任何回调不写状态或游标；重连不自动重发业务写入，服务端不新增请求结果重放保证。5秒为正常可控网络的验收目标，非任意移动网络的保证。
 
 Windows 连接状态为 connecting/syncing/connected/offline，与 Android 状态机不同；connected 不代表待上传 outbox 已清空。TaskSnapshot 中 freshness 描述采集证据的新鲜度，不表示手机当前网络状态。
 
@@ -84,9 +84,7 @@ commandExecution/fileChange/requestApproval 显示命令、目录、原因或修
 
 请求 ID 使用随机 UUID，官方 RPC id 与 threadId/turnId 仅由工作站保存。服务端以 requestId+threadId 校验和幂等；处理中重复提交不再次转发，终态在当前服务进程内保留最多 1000 个回执用于重连/重复提交。超出窗口或服务重启返回 expired，绝不重新执行。手机断线不会取消请求；工作站重连重新发布尚未解决请求。官方解决通知、目标回合终止和 app-server 退出使请求过期。无官方截止时间时不臆造超时，也不把无回执当作成功。
 
-普通消息只串行同一线程的短 RPC 提交，上一条 RPC 完成即提交下一条，不等待回合结束、不建立本地任务审批或回合队列。工作站当前缓存的 turn 为 `inProgress` 时必须直接 `turn/steer`；不得先 `thread/resume`。不存在活动 turn 时才 `thread/resume`，resume 后若返回活动 turn 改用 steer，否则 `turn/start`。同一工作站的连续消息由官方 steer 接收并关联同一 turn。
-
-`thread/resume` 的官方 `already has an active writer` 失败先触发一次同线程 `thread/turns/list` 权威读取：若返回当前工作站可 steer 的 `inProgress` 回合，工作站必须改用 `turn/steer`，解决本地通知缓存尚未更新造成的自有回合误判。权威读取仍无活动回合时，才说明另一 Codex 实例持有写入权，并转换为固定的脱敏失败提示；不得回传 threadId、原始 app-server 文本或其他实例信息，不得开始新 turn、重新 resume、排入本地队列或自动重试。手机保留草稿并结束当前 requestId；其他发送失败仍与其 requestId 关联。
+普通消息与回执以 [Desktop 会话消息发送合同](desktop-message-routing.zh-CN.md) 为准：由 Desktop 接收目标会话消息，独立 app-server 不再负责消息写入。started 仅表示接受并结束本次发送等待，不能与无关联的回合通知拼接。
 
 筛选顺序为全部、进行中、已完成、失败、待确认。待处理交互优先于运行态；明确失败、官方当前活动、明确完成和证据过期按状态规则投影。运行证据不足归 needs_action；官方 Goal 的 active/paused/blocked 等属于输入域，转换成四种展示状态不是保留旧客户端协议。
 
