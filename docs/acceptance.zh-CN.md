@@ -2,7 +2,7 @@
 
 ## Android 后台网络恢复
 
-本轮完成 Android 连接恢复实现；发布候选为 Android 2.0.12（versionCode 15）。详细场景与通过条件见 [网络恢复设计](android-network-recovery.zh-CN.md)，文档审查见 [审查记录](frontend-design/review.md)。Windows、服务端、协议和 SQLite schema 未改变。
+本轮完成 Android 连接恢复、通知去重和任务首页下拉刷新实现；当前构建版本 Android 2.0.14（versionCode 17）。详细场景与通过条件见 [网络恢复设计](android-network-recovery.zh-CN.md)，文档审查见 [审查记录](frontend-design/review.md)。Windows、服务端、协议和 SQLite schema 未改变。
 
 实现定义唯一连接、前台/网络唤醒、25秒总握手与15秒认证订阅期限、1至6秒退避、旧连接失效、缓存草稿保留及停止服务竞态。前后端协议无需升级；不自动重发未知结果的写操作。用户已确认的无真机限制仍保留。
 

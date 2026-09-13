@@ -81,4 +81,10 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
             }
         } else _state.value = _state.value.copy(interactionResults = _state.value.interactionResults + (request.requestId to InteractionResult("interaction.result", PROTOCOL_VERSION, request.requestId, request.threadId, "failed", error="连接不可用，请重连后重试")))
     }
+    fun refresh() {
+        if (_state.value.isRefreshing) return
+        if (!coordinator.refreshNow()) {
+            _state.value = _state.value.copy(isRefreshing = false, refreshError = "连接不可用，请稍后重试")
+        }
+    }
 }

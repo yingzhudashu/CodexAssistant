@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package site.codexassistant
 
 import android.content.Intent
@@ -12,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -136,7 +138,12 @@ internal fun openDownload(context:android.content.Context,url:String?) {
                 }
                 if(page!="tasks") SettingsPage(page,{page=it},state,credentials,onEditConnection,Modifier.weight(1f))
                 else {
-                    if(dual || selected==null) LazyColumn(Modifier.then(if(dual) Modifier.width(320.dp) else Modifier.weight(1f)).fillMaxHeight(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                    if(dual || selected==null) PullToRefreshBox(
+                        isRefreshing = state.isRefreshing,
+                        onRefresh = { vm.refresh() },
+                        modifier = Modifier.then(if(dual) Modifier.width(320.dp) else Modifier.weight(1f)).fillMaxHeight()
+                    ) {
+                    LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                         item { if(state.backgroundSyncStatus=="unavailable") Text(backgroundSyncSummary(state)); Text("任务工作台",style=MaterialTheme.typography.headlineSmall);Text(connectionSummary(state),color=MaterialTheme.colorScheme.onSurfaceVariant) }
                         item { OutlinedTextField(query,{query=it},Modifier.fillMaxWidth(),label={Text("搜索任务或项目")},singleLine=true) }
                         item { Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -147,6 +154,8 @@ internal fun openDownload(context:android.content.Context,url:String?) {
                         val rows=state.tasks.filter{(filter=="all"||it.status==filter)&&(query.isBlank()||"${it.title} ${it.projectName.orEmpty()}".contains(query,true))}
                         if(state.connected && rows.isEmpty()) item{Text(if(query.isBlank()&&filter=="all") "暂无任务，在工作站开始任务后会显示在这里。" else "没有匹配任务，请调整搜索或筛选。")}
                         items(rows,key={it.id}){task->TaskCard(task,task.id==selectedId){selectedId?.let(vm::closeDetail);selectedId=task.id;vm.loadDetail(task.id)}}
+                        state.refreshError?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
+                    }
                     }
                     if(selected!=null) TaskDetail(vm,selected,state,Modifier.weight(1f)){vm.closeDetail(selected.id);selectedId=null}
                     else if(dual) Box(Modifier.weight(1f).fillMaxHeight(),contentAlignment=Alignment.Center){Text("选择任务查看详情")}

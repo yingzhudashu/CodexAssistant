@@ -36,6 +36,8 @@ data class TaskState(
     val interactions: Map<String,InteractionRequest> = emptyMap(),
     val interactionResults: Map<String,InteractionResult> = emptyMap(),
     val submittingInteractions: Set<String> = emptySet(),
+    val isRefreshing: Boolean = false,
+    val refreshError: String? = null,
 )
 
 /** One serialized connection lifecycle. Network and Activity signals come from SyncCoordinator. */
@@ -66,6 +68,8 @@ class TaskRepository internal constructor(
         available = networkAvailable
         recovery?.invoke(networkAvailable, foreground, networkChanged)
     }
+    /** 手动刷新复用当前认证上下文和唯一连接生命周期。 */
+    fun refreshNow(): Boolean = synchronized(lock) { val callback = recovery ?: return@synchronized false; callback(available, true, true); true }
     fun stop() = synchronized(lock) { closed = true; shutdown?.invoke() }
     private fun send(payload: String): Boolean = synchronized(lock) { !closed && activeSocket?.send(payload) == true }
     fun requestDetail(threadId: String, cursor: String? = null): String {
@@ -91,6 +95,7 @@ class TaskRepository internal constructor(
         var deadlineJob: Job? = null
         var deadline = 0L
         var permanentFailure = false
+        var refreshRequested = false
         var traceUploadRunning = false
         lateinit var connect: () -> Unit
 
@@ -119,7 +124,10 @@ class TaskRepository internal constructor(
         fun disconnected(reason: String) {
             invalidate()
             state = state.copy(connected=false, result=null, connectionStatus=if(available) "reconnecting" else "offline",
-                error=reason, networkAvailable=available, retryAtEpochMs=null)
+                error=reason, networkAvailable=available, retryAtEpochMs=null,
+                isRefreshing = if (refreshRequested) false else state.isRefreshing,
+                refreshError = if (refreshRequested) reason else state.refreshError)
+            refreshRequested = false
             retryJob?.cancel(); retryJob = null
             if (available && !permanentFailure && !closed) {
                 val wait = (++retryAttempt).coerceAtMost(6) * 1000L
@@ -149,7 +157,7 @@ class TaskRepository internal constructor(
             if(accessToken==null) { permanentFailure=true;state=state.copy(connected=false,connectionStatus="not_configured",error="请先配置访问 Token",retryAtEpochMs=null);publish();return@connect }
             val attemptGeneration=generation
             val connectionTraceId=traceLogger.newTraceId()
-            traceLogger.event("websocket.connect",connectionTraceId)
+            traceLogger.event("android.sync.connect",connectionTraceId)
             state=state.copy(connected=false,result=null,networkAvailable=true,connectionStatus="connecting",error=null,retryAtEpochMs=null)
             publish()
             armDeadline(elapsed()+25_000)
@@ -161,7 +169,7 @@ class TaskRepository internal constructor(
                     armDeadline(minOf(deadline,elapsed()+15_000))
                     state=state.copy(connectionStatus="authenticating",error=null)
                     publish()
-                    traceLogger.event("websocket.open",connectionTraceId)
+                    traceLogger.event("android.sync.authenticate",connectionTraceId)
                     if(!webSocket.send(json.encodeToString(ClientAuthMessage(token=accessToken)))) disconnected("认证发送失败")
                 } }
                 override fun onMessage(webSocket:WebSocket,text:String) { synchronized(lock) {
@@ -180,16 +188,16 @@ class TaskRepository internal constructor(
                         when (messageType) {
                             "authenticated" -> {
                                 check(state.connectionStatus == "authenticating")
-                                traceLogger.event("websocket.authenticated", connectionTraceId)
+                                traceLogger.event("android.sync.authenticate", connectionTraceId)
                                 scheduleTraceUpload()
                                 state = state.copy(connectionStatus = "subscribing", error = null)
                                 trySend(state)
                                 webSocket.send(json.encodeToString(ClientSubscribeMessage(after = state.cursor)))
-                                traceLogger.event("websocket.subscribe", connectionTraceId)
+                                traceLogger.event("android.sync.subscribe", connectionTraceId)
                                 scheduleTraceUpload()
                             }
                             "event" -> {
-                                val event = traceLogger.span("websocket.event.decode", connectionTraceId) { json.decodeFromString<EventMessage>(text).event }
+                                val event = traceLogger.span("android.sync.event", connectionTraceId) { json.decodeFromString<EventMessage>(text).event }
                                 scheduleTraceUpload()
                                 if (event.sequence <= state.cursor) return@synchronized
                                 state = state.copy(cursor = event.sequence, tasks = upsert(state.tasks, event.task), error = null, lastConnectedAtEpochMs = System.currentTimeMillis(), lastTraceId = event.trace.traceId)
@@ -201,9 +209,10 @@ class TaskRepository internal constructor(
                                 deadlineJob?.cancel(); deadlineJob = null; retryAttempt = 0
                                 activeSocket = webSocket
                                 val snapshot = json.decodeFromString<SnapshotMessage>(text)
-                                state = traceLogger.span("websocket.snapshot.reducer", connectionTraceId) {
-                                    state.copy(connected = true, connectionStatus = "connected", retryAttempt = 0, retryAtEpochMs = null, interactions = emptyMap(), interactionResults = emptyMap(), cursor = snapshot.cursor, tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis())
+                                state = traceLogger.span("android.sync.snapshot", connectionTraceId) {
+                                    state.copy(connected = true, connectionStatus = "connected", retryAttempt = 0, retryAtEpochMs = null, interactions = emptyMap(), interactionResults = emptyMap(), cursor = snapshot.cursor, tasks = snapshot.tasks.sortedByDescending { it.updatedAt }, error = null, lastConnectedAtEpochMs = System.currentTimeMillis(), isRefreshing = false, refreshError = null)
                                 }
+                                refreshRequested = false
                                 scheduleTraceUpload()
                                 saveCursor(state.cursor)
                                 trySend(state)
@@ -268,7 +277,11 @@ class TaskRepository internal constructor(
                 val changed=state.networkAvailable!=network
                 state=state.copy(networkAvailable=network)
                 if(!permanentFailure && !closed) {
-                    if(!network) disconnected("等待网络恢复")
+                    if (foreground && networkChanged) {
+                        refreshRequested = true
+                        state = state.copy(isRefreshing = true, refreshError = null)
+                        if (!network) disconnected("等待网络恢复") else connect()
+                    } else if(!network) disconnected("等待网络恢复")
                     else if(changed || networkChanged || foreground && (state.connected || socket==null || elapsed()>=deadline)) connect()
                 }
                 publish()
