@@ -2,10 +2,10 @@
 
 CodexAssistant 是独立的 Codex 任务进度同步工具：Windows Electron 托盘端通过官方 `codex app-server` JSON-RPC 读取线程元数据，并从其返回的本机会话文件中增量提取开始、完成和中止事件，完成脱敏后通过 HTTPS 上传；Fastify 服务端写入 SQLite 并以 WebSocket 推送；Android Compose 客户端显示任务与本地通知，通过前台服务保持同步。
 
-当前发布版本（2026-09-12）：Windows **2.0.14**、Android **2.0.13**（Android versionCode **16**）；协议为 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端和协议包的 npm 版本仍为 2.0.0，不代表客户端安装包版本。
+当前发布版本（2026-09-13）：Windows **2.0.15**、Android **2.0.14**（Android versionCode **17**）；协议为 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端和协议包的 npm 版本仍为 2.0.0，不代表客户端安装包版本。
 
-- [Windows 安装包](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.14.exe)（未签名）
-- [Android APK](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.13.apk)（release 签名）
+- [Windows 安装包](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.15.exe)（未签名）
+- [Android APK](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.14.apk)（release 签名）
 - [在线更新清单](https://server.example.com/codex-assistant/downloads/manifest.json)
 
 Windows 与 Android 填写同一站点根地址，例如 `https://server.example.com`，以及服务端配置的访问 Token。不要在地址末尾追加 API 路径。两端均提供检查更新与下载入口，下载由系统浏览器处理。
@@ -13,9 +13,10 @@ Windows 与 Android 填写同一站点根地址，例如 `https://server.example
 ## 当前版本边界
 
 - 协议固定为 `codex-assistant.v3`，未知字段、错误协议版本和旧 SQLite schema 直接拒绝。
-- 任务状态同时包含 Goal 状态、官方线程运行态、active flags、最近 Turn 结果和数据新鲜度；Goal 优先，失败和中止的 Turn 优先于线程运行态；其余组合按[状态规则](docs/protocol.zh-CN.md)处理。
+- 任务状态同时包含 Goal 状态、官方线程运行态、active flags、最近 Turn 结果和数据新鲜度；明确失败/等待与当前活动证据优先于历史回合；完整优先级按[状态规则](docs/protocol.zh-CN.md)处理。
 - 本机历史开始记录不永久等于运行中：普通静默回合 30 分钟后进入待确认；当前回合仍有 `inProgress` 操作时会保留进行中状态最多 6 小时，并以缓存状态展示。明确的官方运行状态不受这些窗口影响。
-- 不上传完整对话、文件内容、命令正文/输出、绝对路径或隐藏推理。
+- 自动状态同步不上传完整对话、文件内容、命令正文/输出、绝对路径或隐藏推理。用户主动发送的正文和按需读取的回合摘要经中转透传。
+- 消息由工作站 Codex Desktop 接收；必须保持官方 Desktop 运行。消息回执仅表示接受，任务进展单独读取；Desktop 自己的审批仍在 Desktop 处理。
 - Android 使用前台服务保持 WebSocket 常驻，并由系统本地通知呈现任务变化；不依赖第三方推送账号。
 
 ## 目录

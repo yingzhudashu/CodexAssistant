@@ -260,7 +260,7 @@ export async function createApp(options: AppOptions): Promise<{ app: FastifyInst
             if (!pending) return;
             if (pending.controller !== socket || pending.threadId !== response.threadId) return reject('validation_failed', 'Control response does not match its owner');
             if (pending.target.readyState === 1) pending.target.send(JSON.stringify(response));
-            if (response.type === 'detail' || response.status === 'completed' || response.status === 'failed') pendingRequests.delete(response.requestId);
+            pendingRequests.delete(response.requestId);
             return;
           }
           return reject("validation_failed", "Desktop control message is invalid");

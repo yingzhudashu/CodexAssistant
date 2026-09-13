@@ -27,9 +27,7 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
         }
         incoming.result?.let { result ->
             if(next.sending[result.threadId]==result.requestId) {
-                val previous=next.results[result.threadId]
-                val merged=if(result.status=="streaming" && previous?.requestId==result.requestId) result.copy(text=previous.text.orEmpty()+result.text.orEmpty()) else result
-                next=next.copy(results=next.results+(result.threadId to merged), sending=if(result.status in listOf("completed","failed")) next.sending-result.threadId else next.sending)
+                next=next.copy(results=next.results+(result.threadId to result), sending=next.sending-result.threadId)
             }
             val pending=detailRequests[result.threadId]
             if(pending?.first==result.requestId && result.status=="failed") {
@@ -62,7 +60,7 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
         }catch(e:Exception){_state.value=_state.value.copy(detailErrors=_state.value.detailErrors+(threadId to (e.message?:"读取失败")))}
     }
     fun send(threadId:String,text:String): String? {
-        if(!_state.value.connected) return null
+        if(!_state.value.connected || threadId in _state.value.sending) return null
         try {
             val id=coordinator.sendMessage(threadId,text)
             _state.value=_state.value.copy(sending=_state.value.sending+(threadId to id),results=_state.value.results-threadId)

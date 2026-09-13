@@ -255,8 +255,8 @@ export const DetailMessageSchema = Strict({
 export type DetailMessage = Static<typeof DetailMessageSchema>;
 export const ResultMessageSchema = Strict({
   type: Type.Literal("result"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier,
-  threadId: Identifier, status: Type.Union([Type.Literal("started"), Type.Literal("streaming"), Type.Literal("completed"), Type.Literal("failed")]),
-  text: Type.Optional(Type.String({ maxLength: 20_000 })), error: Type.Optional(Type.String({ maxLength: 500 })),
+  threadId: Identifier, status: Type.Union([Type.Literal("started"), Type.Literal("failed")]),
+  error: Type.Optional(Type.String({ maxLength: 500 })),
 });
 export type ResultMessage = Static<typeof ResultMessageSchema>;
 

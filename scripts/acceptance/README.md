@@ -1,6 +1,6 @@
 # 本地验收脚本
 
-从仓库根目录运行。测试只使用临时目录和合成数据；不部署、不发布、不回复现有用户会话。日志输出到 `artifacts/acceptance-2026-09-10/`，目录需预先存在。
+从仓库根目录运行。测试使用临时目录和合成数据，不部署或发布。desktop-message 是明确例外：它将手动输入的验收消息发送到指定现有 Desktop 会话，必须使用用户授权的验收目标。新消息验收和 Electron 报告输出到 `artifacts/acceptance-2026-09-13/`；历史脚本仍使用各自原有目录。
 
 ## 自动化
 
@@ -13,11 +13,11 @@ python docs/frontend-design/render.py
 python docs/frontend-design/validate.py
 node_modules\.bin\electron.cmd scripts/acceptance/electron-smoke.cjs
 node --import tsx scripts/acceptance/official-smoke.ts
-node --import tsx scripts/acceptance/official-steer.ts
+node --import tsx scripts/acceptance/desktop-message.ts <threadId>
 node --import tsx scripts/acceptance/server-endurance.ts
 ```
 
-官方测试需要本机 Codex 已具备模型访问能力。模型以 `thread/start` 的实际返回值为准，不能从模型列表猜测当前提供商的可用默认模型。`official-smoke` 使用 plan 模式、低推理强度和 ephemeral 线程，等待真实用户选项请求并回复合成答案；`official-steer` 验证一个 start 后连续两个 steer。诊断仅记录事件类型、耗时和错误类别，不保存账号凭据及现有会话内容。
+官方测试需要本机 Codex 已具备模型访问能力。模型以 `thread/start` 的实际返回值为准，不能从模型列表猜测当前提供商的可用默认模型。`official-smoke` 使用 plan 模式、低推理强度和 ephemeral 线程，等待真实用户选项请求并回复合成答案；`desktop-message` 启动本机隔离验收中转，由实际 Android 发消息到指定 Desktop 会话；该脚本不创建新会话。诊断仅记录事件类型、耗时和错误类别，不保存账号凭据及现有会话内容。
 
 `server-endurance` 先通过真实 HTTP 写入 1000 个不同任务，再持续 30 分钟更新，通过真实 WebSocket 收集快照和事件，每 5 分钟重连。每分钟写入阶段报告；只有 `completed=true`、最终游标和任务数匹配才算完成。首个近零时间样本不用于稳定 CPU 结论。测试仅代表本地服务与客户端协议负载，不能外推成所有端、模型或真机的长期测试。
 

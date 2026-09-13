@@ -95,11 +95,11 @@
 
 恢复后实测确认采集与上传链路正常；真实队列序号、业务计数和设备状态只保存在仓库外。
 
-## 手机消息 active writer 修复（2026-09-11）
+## 历史自有回合修复记录（2026-09-11，已被新发送合同取代）
 
 用户截图确认 Android 发送消息时，工作站返回 `thread ... already has an active writer`。审查发现 Monitor 对每条消息都先调用 `thread/resume`，即使自身已缓存同一线程的 inProgress turn；该行为与 Codex app-server 的单写入者约束冲突。
 
-修复后的顺序是：当前工作站缓存 turn 为 inProgress 时只调用 `turn/steer`；无活动 turn 才调用 `thread/resume`，resume 后若返回活动 turn 则 steer，否则 start。每线程仍只串行短暂 RPC，不等待回合结束，也没有增加本地业务消息队列。`already has an active writer` 统一映射为脱敏归属提示，禁止重试、接管或新建 turn；服务端仍使用 requestId + threadId 关联回执，协议字段未变。
+当时的实现顺序是：当前工作站缓存 turn 为 inProgress 时只调用 `turn/steer`；无活动 turn 才调用 `thread/resume`，resume 后若返回活动 turn 则 steer，否则 start。每线程仍只串行短暂 RPC，不等待回合结束，也没有增加本地业务消息队列。`already has an active writer` 统一映射为脱敏归属提示，禁止重试、接管或新建 turn；服务端仍使用 requestId + threadId 关联回执，协议字段未变。
 
 Android 发送草稿不再以本地 WebSocket 写入成功为清空条件，仅在相同 requestId 收到工作站 `started` 回执后清空。工作站拒绝、归属冲突、断线和未知结果均保留草稿。Node 回归新增 direct-steer 和 active-writer 两个场景，最终为 12 文件 / 45 项通过；Android debug 单元测试、assembleDebug 和 lintDebug 通过。物理 Android 设备限制仍按用户确认保留。
 
@@ -150,3 +150,34 @@ Windows `2.0.14`：`111614927` 字节，SHA-256 `15c8f5a98ddbd78c29b1549a14e85bd
 | Android | 2.0.12 / code 15 | 2171891 | `fe038752012028ae0b32a278fa08bb4e7996b9c29d786869cc3dd5fcdbbc8d13` |
 
 本地发布证据位于 `artifacts/production-2026-09-12/`；二进制包、下载副本、签名材料和运行时诊断不提交 Git。无真机时，锁屏、Doze、移动网络、通知声音、厂商后台策略和覆盖安装仍是明确限制。
+
+## 2026-09-13 Desktop 持有会话的发送修复
+
+此前 2.0.14/2.0.13 的自有 app-server 回归没有解决用户现场问题：独立 app-server 即使读取到 turn，也没有 Desktop 会话的写入权。本次删除 resume/start/steer 发送路径，通过 Desktop 本机 app-tools 的 send_message_to_thread 投递到原 threadId。原实现测试不再作为 Desktop 会话可发送的证明，旧 official-steer 验收脚本删除。
+
+合同见 [Desktop 消息发送](desktop-message-routing.zh-CN.md)。started 是本次消息接受回执，立即释放服务端路由和手机发送等待；不再等待无从关联的回合完成通知，不自动重发未知结果。两端拒绝保留草稿，迟到回执不清空用户已编辑的新内容。删除 result 的 streaming/completed/text；协议仍为 codex-assistant.v3，schema=6，三端同步升级。
+
+| 验收项 | 结果与证据 |
+|---|---|
+| 真实 Desktop 活动会话 | 通过：当前运行会话实际收到 20260913-A 直接宿主标记，以及 CA_ANDROID_B / CA_ANDROID_C 手机标记，无写入者错误 |
+| Android → 中转 → Monitor → Desktop | 专用 API 36 模拟器、实际 Debug APK 与实际 Fastify 中转；连续两次接受耗时 882ms、84ms，输入清空且可继续发送。验收夹具的任务快照/回合摘要是合成数据，发送通道是真实宿主 |
+| Android 草稿与异常 | 合成拒绝保留正文；5秒延迟回执期间插入的新内容保留；该延迟场景不向真实会话写消息 |
+| Node 回归 | 13文件58项通过：真实命名管道分片/连续帧、并发连接、乱序响应、坏响应、帧上限、超时/断开不重发、多个宿主拒绝、发送串行与错误清理、服务器接受后断线不覆盖回执 |
+| Android 构建与测试 | 13项单元测试，0失败/0跳过；Debug构建/lint通过，lint为0错误17警告；Release R8及APK v2签名验证通过 |
+| Windows UI | Electron实际renderer/preload，8项通过；含主题、交互、托盘、接受回执、失败草稿和编辑草稿保留；无控制台错误 |
+| 包内代码检查 | Windows 2.0.15 asar包含新宿主；host/monitor与构建输出一致，renderer只存在无语义的CRLF/LF差异 |
+| Release APK启动 | 隔离模拟器安装2.0.14/code17，通知权限与首次连接页正常，崩溃日志为空；不能替代真机覆盖安装验收 |
+| 文档门 | 14份Markdown检查、字段/枚举对照通过；13页29交互57图重新渲染，静态验证0问题，人工检查预览和两端发送界面 |
+
+本地证据位于 artifacts/acceptance-2026-09-13/。保留限制：官方 Desktop 26.908.4834.0 的本机工具通道不是公开稳定 API；独立审批所有权未转移，Desktop自己的选项仍需在Desktop处理；无真机，厂商保活、硬件声音、移动网络与真机覆盖安装不宣称通过。
+
+服务端于2026-09-13部署 release `private-release-id`，现有schema6数据保留，服务及公网health通过。配置回滚备份在 `/var/backups/codex-assistant/private-release-id`。下载清单备份在 `/var/backups/codex-assistant/20260913-desktop-host`。
+
+| 安装包 | 字节数 | SHA-256 |
+|---|---:|---|
+| Windows 2.0.15（NotSigned） | 111699374 | `127c7ca85a376c511f49c4b44760642beaae9dc7363ee272ff7cf9acd08b4b55` |
+| Android 2.0.14/code17（release签名） | 2171891 | `cec9a8f4cf7e59688a0207f7c854cd16fe33ef1fd1cc0366f4c3d1e0b1aa53fc` |
+
+两个版本化安装包已完成服务器SHA-256核对并以原子清单发布。开发电脑已安装的Windows仍为2.0.14，本次没有替换该安装；需安装2.0.15才能使用新发送通道，仅更新手机无效。
+
+公网完整下载复核已通过：EXE/APK字节数与SHA-256均与联合清单一致；manifest为no-store，两个版本化二进制均为immutable。发布证据位于 artifacts/production-2026-09-13/。

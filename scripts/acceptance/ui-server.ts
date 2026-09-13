@@ -40,7 +40,7 @@ ws.on('message', async data => {
       send({ type: 'interaction.result', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, status: official.cancel ? 'cancelled' : 'submitted' });
     } catch { send({ type: 'interaction.result', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, status: 'failed', error: '请选择至少两项并填写说明' }); }
   }
-  if (m.type === 'send') send({ type: 'result', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, status: 'completed' });
+  if (m.type === 'send') send({ type: 'result', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, status: 'started' });
 });
 console.log('Synthetic UI acceptance server ready on loopback port 33241');
 process.on('SIGINT', async () => { ws.terminate(); await server.close(); await rm(directory, { recursive: true, force: true }); process.exit(); });

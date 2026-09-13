@@ -5,19 +5,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
-import { ACTIVE_WRITER_MESSAGE, Monitor } from '../src/monitor.js';
+import { DESKTOP_HOST_UNAVAILABLE_MESSAGE, Monitor } from '../src/monitor.js';
 
-const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, response: vi.fn(), turn: undefined as any, starts: 0, steers: 0, resumes: 0, resumeError: undefined as Error | undefined }));
+const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, response: vi.fn(), hostError: undefined as Error | undefined, hostSend: vi.fn() }));
 vi.mock('../src/app-server.js', () => ({ CodexAppServer: class {
   constructor(options: any) { state.request = options.onRequest; state.notification = options.onNotification; }
   get ready() { return true; }
   async start() {} async stop() {} setTraceContext() {}
   async listThreads() { return []; }
-  async resumeThread() { state.resumes++; if (state.resumeError) throw state.resumeError; } latestTurn() { return state.turn; }
-  async recoverActiveTurn() { return undefined; }
-  ownsTurn() { return false; }
-  async startTurn() { state.starts++; state.turn = { id: 'turn-1', status: 'inProgress' }; return { turn: state.turn }; }
-  async steerTurn() { state.steers++; return { turnId: 'turn-1' }; }
   respond(id: number | string, result: unknown) { state.response(id, result); }
 } }));
 vi.mock('ws', () => ({ default: class extends EventEmitter {
@@ -27,12 +22,12 @@ vi.mock('ws', () => ({ default: class extends EventEmitter {
   close() { this.readyState = 3; this.emit('close'); }
 } }));
 const cleanup: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const f of cleanup.splice(0)) await f(); vi.unstubAllGlobals(); state.response.mockReset(); state.resumeError = undefined; });
+afterEach(async () => { for (const f of cleanup.splice(0)) await f(); vi.unstubAllGlobals(); state.response.mockReset(); state.hostSend.mockReset(); state.hostError = undefined; });
 async function fixture() {
-  state.turn = undefined; state.starts = 0; state.steers = 0; state.resumes = 0;
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200 })));
   const directory = await mkdtemp(join(tmpdir(), 'codex-interaction-audit-'));
-  const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: 'http://127.0.0.1:3240', token: 'synthetic-test-token', deviceId: 'test-device', onTasks() {} });
+  const desktopHost = { sendMessage: async (threadId: string, prompt: string) => { state.hostSend(threadId, prompt); if (state.hostError) throw state.hostError; } };
+  const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: 'http://127.0.0.1:3240', token: 'synthetic-test-token', deviceId: 'test-device', onTasks() {}, desktopHost });
   cleanup.push(async () => { await monitor.stop(); await rm(directory, { recursive: true, force: true }); });
   await monitor.start();
   state.socket.emit("message", JSON.stringify({type:"authenticated"}));
@@ -66,12 +61,12 @@ it('serializes confirmation as the official decision object, not a Boolean', asy
   expect(state.response).toHaveBeenCalledWith(11, { decision: 'accept' });
 });
 
-it('reports a failed turn carried by turn/completed as failed', async () => {
+it('does not assign unrelated turn failure to an accepted Desktop message', async () => {
   const socket = await fixture();
   socket.emit('message', JSON.stringify({ type: 'send', requestId: 'message-1', threadId: 'thread-1', text: 'run' }));
   await vi.waitFor(() => expect(socket.sent.some((m: any) => m.status === 'started')).toBe(true));
-  state.notification({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'failed', error: { message: 'Synthetic failure' } } } });
-  expect(socket.sent.at(-1).status).toBe('failed');
+  state.notification({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'unrelated', status: 'failed', error: { message: 'Synthetic failure' } } } });
+  expect(socket.sent.at(-1).status).toBe('started');
 });
 
 it('returns a submission result to the phone instead of silently discarding the request', async () => {
@@ -82,29 +77,29 @@ it('returns a submission result to the phone instead of silently discarding the 
   expect(socket.sent.some((m: any) => m.type === 'interaction.result')).toBe(true);
 });
 
-it('serializes only RPC submission, steering subsequent messages before the turn finishes', async () => {
+it('forwards consecutive messages to the Desktop host without local writer RPCs', async () => {
   const socket = await fixture();
   for (let i = 1; i <= 3; i++) socket.emit('message', JSON.stringify({ type: 'send', requestId: `send-${i}`, threadId: 'thread-1', text: `message ${i}` }));
   await vi.waitFor(() => expect(socket.sent.filter((m: any) => m.type === 'result' && m.status === 'started')).toHaveLength(3));
-  expect(state.starts).toBe(1); expect(state.resumes).toBe(1); expect(state.steers).toBe(2);
-  state.notification({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } });
-  expect(socket.sent.filter((m: any) => m.status === 'completed').map((m: any) => m.requestId)).toEqual(['send-1', 'send-2', 'send-3']);
+  expect(state.hostSend.mock.calls).toEqual([['thread-1', 'message 1'], ['thread-1', 'message 2'], ['thread-1', 'message 3']]);
+  state.notification({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'unrelated', status: 'completed' } } });
+  expect(socket.sent.filter((m: any) => m.status === 'completed').map((m: any) => m.requestId)).toEqual([]);
 });
 
-it('steers a known active workstation turn without attempting resume', async () => {
+it('accepts a message while a local app-server reports an active turn', async () => {
   const socket = await fixture();
-  state.turn = { id: 'turn-1', status: 'inProgress' };
-  socket.emit('message', JSON.stringify({ type: 'send', requestId: 'steer-only', threadId: 'thread-1', text: 'continue' }));
-  await vi.waitFor(() => expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'steer-only', status: 'started' })));
-  expect(state.resumes).toBe(0); expect(state.starts).toBe(0); expect(state.steers).toBe(1);
+  state.notification({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'inProgress' } } });
+  socket.emit('message', JSON.stringify({ type: 'send', requestId: 'host-active', threadId: 'thread-1', text: 'continue' }));
+  await vi.waitFor(() => expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'host-active', status: 'started' })));
+  expect(state.hostSend).toHaveBeenCalledWith('thread-1', 'continue');
 });
 
-it('redacts an active writer conflict and leaves the request failed without retrying', async () => {
+it('redacts an unavailable Desktop host and keeps the original thread identifier private', async () => {
   const socket = await fixture();
-  state.resumeError = new Error('thread secret-thread already has an active writer');
-  socket.emit('message', JSON.stringify({ type: 'send', requestId: 'writer-conflict', threadId: 'secret-thread', text: 'continue' }));
-  await vi.waitFor(() => expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'writer-conflict', status: 'failed', error: ACTIVE_WRITER_MESSAGE })));
-  const result = socket.sent.find((value: any) => value.requestId === 'writer-conflict');
+  state.hostError = new Error('CODEX_DESKTOP_HOST_UNAVAILABLE: \\.\\pipe\\private-thread');
+  socket.emit('message', JSON.stringify({ type: 'send', requestId: 'host-unavailable', threadId: 'secret-thread', text: 'continue' }));
+  await vi.waitFor(() => expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'host-unavailable', status: 'failed', error: DESKTOP_HOST_UNAVAILABLE_MESSAGE })));
+  const result = socket.sent.find((value: any) => value.requestId === 'host-unavailable');
   expect(result.error).not.toContain('secret-thread');
-  expect(state.resumes).toBe(1); expect(state.starts).toBe(0); expect(state.steers).toBe(0);
+  expect(result.error).not.toContain('pipe');
 });
