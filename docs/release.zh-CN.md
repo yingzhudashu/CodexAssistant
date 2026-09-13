@@ -49,3 +49,7 @@ Windows 使用 semver 比较顶层 version，仅提示更高的有效版本；An
 2026-09-12 已发布客户端网络恢复修复包：Windows 2.0.13、Android 2.0.12（versionCode 15）。服务端、协议和 SQLite schema 没有变化，保留已验证的服务端 release；联合清单已原子更新，旧清单保存于 `/var/backups/codex-assistant/20260912-network-recovery/download-manifest.json`。完整公网下载哈希、缓存头和健康检查见 [验收记录](acceptance.zh-CN.md)。
 
 2026-09-12 已发布 active-writer 误判修复包：Windows 2.0.14、Android 2.0.13（versionCode 16）。工作站在 `resume` 冲突后仅对本进程已观察的活动回合执行 `steer`，避免将其他实例回合接管。协议和 SQLite schema 不变；发布包为版本化不可变文件，哈希与公网验收见 [验收记录](acceptance.zh-CN.md)。
+
+## 2026-09-14 构建与部署记录
+
+协议、服务端和 Windows 2.0.15 构建通过，Windows NSIS 安装包已生成，未启用 Authenticode 签名。Android 2.0.14（versionCode 17）Debug APK 构建通过，SHA-256 为 `d497146e353fae8ad0d5a63c369c3b21f22bb2c63edb45a3ddbffa86a70456aa`；生产 Release 因本机缺少 keystore 未签名。Windows 安装包 SHA-256 为 `127c7ca85a376c511f49c4b44760642beaae9dc7363ee272ff7cf9acd08b4b55`。服务端部署脚本已执行构建，但上传阶段因 SSH 主机别名 `robotclaw-server` 无法连接而停止，未切换线上 current，线上数据未被修改。
