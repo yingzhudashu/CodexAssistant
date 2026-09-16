@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([string]$Server = 'deployment-host')
+param(
+    [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.@-]*$')][string]$Server,
+    [Parameter(Mandatory)][ValidatePattern('^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$')][string]$PublicOrigin
+)
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -12,7 +15,8 @@ $androidCode = [int][regex]::Match($androidSource, 'versionCode\s*=\s*(\d+)').Gr
 if ($windows.version -ne $windowsVersion -or $android.versionName -ne $androidVersion -or $android.versionCode -ne $androidCode) {
     throw 'Build manifests differ from source versions; rebuild before publishing.'
 }
-$baseUrl = 'https://server.example.com/codex-assistant/downloads'
+# 下载地址来自本次明确指定的部署目标，联合清单只写入被忽略的产物目录。
+$baseUrl = "$PublicOrigin/codex-assistant/downloads"
 $downloads = [ordered]@{}
 foreach ($platform in 'windows', 'android') {
     $build = if ($platform -eq 'windows') { $windows } else { $android }
@@ -103,7 +107,7 @@ temporary_manifest = destination / ('.' + stage.name + '-manifest.json')
 temporary_manifest.write_bytes(raw)
 os.chmod(temporary_manifest, 0o644)
 os.replace(temporary_manifest, manifest_path)
-with urllib.request.urlopen('https://server.example.com/codex-assistant/downloads/manifest.json', timeout=30) as response:
+with urllib.request.urlopen(sys.argv[2] + '/manifest.json', timeout=30) as response:
     assert 'no-store' in response.headers.get('Cache-Control', '')
     assert response.read() == raw, 'Public manifest verification failed'
 # 只删除本次创建且已校验的上传文件，不递归清理其他目录。
@@ -113,7 +117,7 @@ for entry in manifest['downloads'].values():
 stage.rmdir()
 print('Client manifest published and verified')
 '@
-$remote | ssh -o BatchMode=yes $Server "sudo -n python3 - '$remoteStage'"
+$remote | ssh -o BatchMode=yes $Server "sudo -n python3 - '$remoteStage' '$baseUrl'"
 if ($LASTEXITCODE) { throw 'Client publication failed; inspect the upload directory and current manifest.' }
 $published = Invoke-WebRequest -Uri "$baseUrl/manifest.json" -TimeoutSec 30
 # 直接比较发布文本，避免不同 PowerShell 版本把 JSON 时间自动转成 DateTime。

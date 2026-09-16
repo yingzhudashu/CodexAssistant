@@ -1,8 +1,8 @@
 # 构建与发布
 
-发布状态：**已发布**。当前 Windows `2.0.16`，Android `2.0.16`（`versionCode=19`），协议 `codex-assistant.v3`，SQLite schema=6。2026-09-16 已从当前源码重新构建并部署至 `deployment-host`，生产 release 为 `private-release-id`，公网联合清单与已发布安装包核验一致。
+发布状态：**已发布**。当前 Windows `2.0.16`，Android `2.0.16`（`versionCode=19`），协议 `codex-assistant.v3`，SQLite schema=6。私有部署的联合清单与已发布安装包核验一致；实际主机、域名、release和备份标识仅保存于仓库外。
 
-当前下载：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)。两端已完整下载校验SHA-256；清单缓存为no-store，安装包缓存为immutable。产物大小、哈希和实际运行测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
+下载路径示例（`server.example.com` 为占位域名，不提供实际下载）：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)。两端已完整下载校验SHA-256；清单缓存为no-store，安装包缓存为immutable。产物大小、哈希和实际运行测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
 
 Android 2.0.16为后台通知修复：独立记录变化、重连补报、固定速率发送、关键状态声音独立节流、specialUse持续订阅及用户电池豁免入口。修复包已发布；此次服务端重新部署复用已验证的两端2.0.16安装包，文件哈希保持不变，未覆盖不可变版本文件。联合清单、两份本地安装包与服务器文件的SHA-256和大小已重新核验。
 
@@ -12,7 +12,7 @@ Android 2.0.16为后台通知修复：独立记录变化、重连补报、固定
 |---|---|
 |Windows|已安装2.0.16无需重复安装；更早版本应更新至2.0.16，取得桌面采集、outbox、Trace和界面优化。Android后台通知补丁未修改Windows代码。|
 |Android|更早版本应更新至2.0.16/code19；已安装该正式包无需重复安装。此次后台通知修复需要设备安装新APK，仅部署服务器不会生效。|
-|服务端|当前release见本页开头；协议v3、schema6。本次重新部署保留现有业务数据，不要求已经使用当前版本的客户端重装。|
+|服务端|实际release见仓库外部署记录；协议v3、schema6。本次重新部署保留现有业务数据，不要求已经使用当前版本的客户端重装。|
 
 Windows在“关于与更新”、Android在设置页点击“检查更新”后，通过系统浏览器下载安装包，也可使用本页下载链接。应用不会静默安装更新。Windows升级前从托盘菜单“退出”停止工作站，安装后重新打开并检查连接和采集状态；仅关闭窗口会继续在托盘运行。Android安装后打开应用，确认连接成功，并在设置→通知核对系统通知权限、提醒渠道和电池优化状态；需要息屏及时接收时，点击“允许后台持续连接”并在系统界面确认。部分厂商还需设置自启动和后台运行权限，排查方式见[运维手册](operations.zh-CN.md#android-生命周期)。
 
@@ -28,6 +28,7 @@ npm run build
 npm test
 npm run check:format
 npm run check:docs
+npm run check:privacy
 npm run check:design
 python docs/frontend-design/validate.py
 npm run test:ui
@@ -53,7 +54,7 @@ Android Release 使用仓库外 keystore、R8 和 apksigner 校验，输出 arti
 
 联合清单包含 product、protocolVersion、releasedAt、顶层 Windows version、downloads.windows/android；平台项包含 url、file、sha256、sizeBytes、versionName，Windows 附 signatureStatus，Android 附递增 versionCode。两份本地构建 manifest 不是联合清单。只发布一端时保留另一端经核实的完整信息。
 
-当前两端联合发布使用 `scripts/publish-clients-production.ps1 -Server deployment-host`。脚本核对源码版本、本地文件大小和哈希，再上传到独立临时目录；拒绝版本倒退及覆盖同名不同内容的安装包。经公网 HTTPS 完整下载校验两份安装包后，原子切换联合清单，并从本机再次检查公网清单。上传或包校验失败时保留旧清单及现场；原始产物清单位于 artifacts，不写入源码。
+当前两端联合发布使用 `scripts/publish-clients-production.ps1 -Server deployment-host -PublicOrigin https://server.example.com`。主机和HTTPS根地址均须显式传入，示例值不是可用的生产配置。脚本核对源码版本、本地文件大小和哈希，再上传到独立临时目录；拒绝版本倒退及覆盖同名不同内容的安装包。经公网HTTPS完整下载校验两份安装包后，原子切换联合清单，并从本机再次检查公网清单。上传或包校验失败时保留旧清单及现场；原始产物清单位于artifacts，不写入源码。
 
 Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错。下载仅交给系统浏览器，应用不自动安装或验证下载哈希。只有清单成功返回后才能提示是否有更新。
 
@@ -67,4 +68,6 @@ Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错�
 
 `scripts/acceptance/production-readonly.mjs` 在目标服务器执行，读取既有环境凭据，检查公网鉴权、HTTP/WS 快照、Trace 父节点及订阅释放。只输出计数与布尔结果，不写业务事件、不发送消息、不打印任务正文或 Token；执行方式见[验收脚本说明](../scripts/acceptance/README.md#生产部署后只读检查)。
 
-安装包与原始报告不提交 Git。需要保留最终交付物时先复制到工作区之外，再执行 `npm run clean -- -WhatIf` / `npm run clean`。
+安装包与原始报告不提交Git。真实部署地址、SSH别名、站点配置文件名、release和备份标识、业务计数仅保存于仓库外；公开材料使用 `server.example.com`、`deployment-host` 和 `<release-id>`。已有发布文件可能包含旧的内置地址或应用标识，源码脱敏不会改变已发布字节；下一次发布必须提高版本并重新验收，不覆盖原文件。本次仅完成源码与材料脱敏，未发布替换安装包。Android后续Release构建首次启动不预填服务器，Windows应用标识统一为 `site.codexassistant`，安装身份变更后的覆盖安装需要单独验收。
+
+需要保留最终交付物时先复制到工作区之外，再执行 `npm run clean -- -WhatIf` / `npm run clean`。

@@ -9,6 +9,7 @@ npm run build
 npm test
 npm run check:format
 npm run check:docs
+npm run check:privacy
 npm run check:design
 python docs/frontend-design/render.py
 python docs/frontend-design/validate.py
@@ -43,7 +44,7 @@ node --import tsx scripts/acceptance/ui-server.ts
 
 ## 生产部署后只读检查
 
-完成目标服务器部署后，将 `production-readonly.mjs` 复制到该服务器临时目录，再使用 `/opt/node-v22.23.2-linux-x64/bin/node` 执行。执行用户需能读取 `/etc/codex-assistant/codex-assistant.env`；脚本复用当前 release 的 ws 依赖。执行结束删除本次上传的脚本。
+完成目标服务器部署后，将 `production-readonly.mjs` 复制到该服务器临时目录，再运行 `/opt/node-v22.23.2-linux-x64/bin/node /tmp/production-readonly.mjs https://server.example.com`。HTTPS根地址为必填参数，执行前替换为自己的目标，不在脚本中保存私人域名。执行用户需能读取 `/etc/codex-assistant/codex-assistant.env`；脚本复用当前release的ws依赖。执行结束删除本次上传的脚本，包含真实计数的输出仅保存在仓库外。
 
 检查范围包括公网 health、未授权请求401、授权任务快照、WSS鉴权/订阅/释放、HTTP Trace父节点及非法查询422。脚本不发送业务事件或控制消息，凭据不离开服务器；诊断请求仍会产生正常Trace记录。输出仅为布尔结果与数量，不包含真实任务正文或标识。为可靠比较HTTP/WS计数和业务事件数，选择业务上传空闲窗口；并发业务变更可能使一致性断言失败，需核实原因，不能自动重置数据。
 

@@ -42,7 +42,7 @@ function error(
   return reply.status(statusCode).send(protocolError(code, message));
 }
 
-/** 创建隔离的 CodexAssistant API，不读写 OtherService 或 OtherService 数据。 */
+/** 创建隔离的 CodexAssistant API，不读写同机其他项目的数据。 */
 export async function createApp(
   options: AppOptions,
 ): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {

@@ -2,9 +2,9 @@
 
 Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和 HTTPS 上传，由 Fastify/SQLite 服务保存，再以 WebSocket 同步给 Android。Windows 和 Android 均支持执行计划、按需回合摘要、消息发送、结构化交互、连接设置及主题切换。
 
-发布状态：**已发布**。当前 Windows **2.0.16**、Android **2.0.16**（Android versionCode **19**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。2026-09-16 已从当前源码重新构建并部署生产服务，核验公网联合下载清单；服务 release 为 `private-release-id`。
+发布状态：**已发布**。当前 Windows **2.0.16**、Android **2.0.16**（Android versionCode **19**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。私有部署已完成验证；具体主机、域名和release标识仅保存在仓库外的部署记录中。
 
-下载：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)（未签名）、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)（Release签名）。Android 2.0.16修复后台通知合并、重连补报和长期订阅，新增设置→通知→允许后台持续连接。两份文件已通过公网完整下载SHA-256校验；安装及真机运行的覆盖范围见[验收记录](docs/acceptance.zh-CN.md)。
+下载路径示例（请将 `server.example.com` 替换为自己的服务域名）：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)（未签名）、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)（Release签名）。Android 2.0.16修复后台通知合并、重连补报和长期订阅，新增设置→通知→允许后台持续连接。两份文件已通过公网完整下载SHA-256校验；安装及真机运行的覆盖范围见[验收记录](docs/acceptance.zh-CN.md)。
 
 升级指引：Windows 已安装 2.0.16 可继续使用，低于该版本应更新；Android 应安装 2.0.16/code19 获取后台通知修复。安装后打开 Android 应用，在设置→通知检查通知权限和“允许后台持续连接”。服务器部署不会自动更新设备上的应用，详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
 
@@ -27,6 +27,7 @@ npm run build
 npm test
 npm run check:format
 npm run check:docs
+npm run check:privacy
 npm run check:design
 $env:CODEX_ASSISTANT_ACCESS_TOKEN = 'replace-with-a-long-random-token'
 $env:CODEX_ASSISTANT_STATE_DIR = (Join-Path $PWD '.state')

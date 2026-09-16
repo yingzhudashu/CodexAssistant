@@ -35,3 +35,10 @@ artifacts/
 android-release.properties
 
 *.trace.jsonl.1
+
+# 私人部署参数、证书和原始审计材料不得进入版本库。
+*.local.json
+*.local.ps1
+*.pem
+*.key
+private/

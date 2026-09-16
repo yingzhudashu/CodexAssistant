@@ -5,12 +5,15 @@ import { createRequire } from 'node:module';
 
 // 在生产服务器执行：凭据仅留在本进程，不输出任务正文、标识或 Token。
 // 仅发起健康检查、读取任务、订阅快照和查询 Trace，不写业务事件或发送消息。
+// 必须显式指定目标；默认地址可能让验收误连到维护者的私人服务。
+const origin = process.argv[2];
+assert(origin && /^https:\/\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/.test(origin), 'Usage: node production-readonly.mjs https://server.example.com');
 const require = createRequire('/opt/codex-assistant/current/apps/server/package.json');
 const WebSocket = require('ws');
 const environment = readFileSync('/etc/codex-assistant/codex-assistant.env', 'utf8');
 const token = environment.match(/^CODEX_ASSISTANT_ACCESS_TOKEN=(.+)$/m)?.[1].trim();
 assert(token && token.length >= 16, 'Production credential is missing');
-const base = 'https://server.example.com/codex-assistant';
+const base = `${origin}/codex-assistant`;
 const protocolVersion = 'codex-assistant.v3';
 const headers = { authorization: `Bearer ${token}` };
 const get = (path, extra = {}) => fetch(`${base}${path}`, { signal: AbortSignal.timeout(15_000), ...extra });

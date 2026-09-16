@@ -1,4 +1,4 @@
-# 复制到用户目录之外的受限路径，例如 %USERPROFILE%\\.codexassistant\\android-release.properties
+# 复制到仓库之外的受限路径，例如 %USERPROFILE%\\.codexassistant\\android-release.properties
 # 文件权限应仅允许当前用户读取。不要提交真实密码或 keystore 私钥。
 storeFile=C:\\secure\\codexassistant-release.jks
 storePassword=<android-keystore-password>

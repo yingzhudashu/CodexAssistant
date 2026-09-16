@@ -28,6 +28,12 @@ nginx -t && systemctl reload nginx
 - `nginx-codex-assistant.locations.conf` 必须包含在已有 HTTPS server 块中；精确 stream location 设置 Upgrade、Connection、3600 秒读超时并关闭代理缓冲。
 - 更新清单单独使用 `no-store`，版本化下载文件使用一年 immutable 缓存，因此不能覆盖已发布版本文件。
 
-从 Windows 工作区运行 `scripts/deploy-production.ps1 -Server deployment-host` 可发布生产服务；脚本依赖已配置的 SSH 别名、scp、服务器 sudo 权限与现有 `/etc/nginx/sites-available/codex-assistant.conf`。它发布服务 release，不负责构建和上传客户端安装包；客户端步骤见 [发布文档](../docs/release.zh-CN.md)。
+从 Windows 工作区运行以下命令发布服务，参数均为示例，执行前替换为自己的目标：
+
+```powershell
+.\scripts\deploy-production.ps1 -Server deployment-host -PublicOrigin https://server.example.com -NginxConfig /etc/nginx/sites-available/codex-assistant.conf
+```
+
+三个参数均必填，没有私人服务器默认值。SSH别名只配置在用户的SSH配置文件中，真实参数及部署报告保存在仓库外。脚本依赖scp、sudo权限和已存在的HTTPS站点配置；在目标HTTPS server块内配置 `include /etc/nginx/snippets/codex-assistant.locations.conf;`。自动插入仅适用于能够唯一定位既有 `/assets/` location的站点，否则直接报错，需手工配置include后再执行。它发布服务release，不负责构建和上传客户端安装包；客户端步骤见[发布文档](../docs/release.zh-CN.md)。
 
 staging unit 只是配置模板，现有生产脚本不会替你发布 staging；需独立准备 release、环境文件和反向代理。生产脚本备份 systemd、Nginx 配置和不兼容 schema 的旧数据库，恢复范围见[回滚说明](../docs/release.zh-CN.md#服务端与回滚)。修改 include 文件前也应核对既有 HTTPS server 的位置，不能将本文件作为完整主站 Nginx 配置覆盖安装。

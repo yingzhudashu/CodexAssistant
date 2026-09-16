@@ -1,7 +1,13 @@
 [CmdletBinding()]
-param([string]$Server = 'deployment-host')
+param(
+    [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.@-]*$')][string]$Server,
+    [Parameter(Mandatory)][ValidatePattern('^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$')][string]$PublicOrigin,
+    [Parameter(Mandatory)][ValidatePattern('^/etc/nginx/[A-Za-z0-9_./-]+$')][string]$NginxConfig
+)
 
 $ErrorActionPreference = 'Stop'
+# 真实部署坐标由操作者显式传入，不在源码中保存私人主机或域名。
+if ($NginxConfig.Split('/') -contains '..') { throw 'Nginx config must not contain parent traversal.' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Push-Location $root
 try {
@@ -44,7 +50,7 @@ target="$app/releases/$release"
 current="$app/current"
 state=/var/lib/codex-assistant
 environment=/etc/codex-assistant/codex-assistant.env
-nginx_config=/etc/nginx/sites-available/codex-assistant.conf
+nginx_config='__NGINX_CONFIG__'
 backup="/var/backups/codex-assistant/$release"
 previous="$(sudo readlink "$current" || true)"
 configs_changed=0
@@ -115,7 +121,7 @@ source = path.read_text(encoding="utf-8")
 needle = "    location ^~ /assets/ {"
 include = "    include /etc/nginx/snippets/codex-assistant.locations.conf;\n\n"
 if source.count(needle) != 1:
-    raise SystemExit("Unable to identify the production OtherService server block")
+    raise SystemExit("Unable to identify the HTTPS server block; configure the include explicitly")
 path.write_text(source.replace(needle, include + needle, 1), encoding="utf-8")
 PY
 fi
@@ -152,14 +158,14 @@ for _ in $(seq 1 30); do
 done
 curl -fsS http://127.0.0.1:3240/codex-assistant/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["protocolVersion"] == "codex-assistant.v3"'
 sudo systemctl reload nginx
-curl -fsS https://server.example.com/codex-assistant/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["protocolVersion"] == "codex-assistant.v3"'
+curl -fsS '__PUBLIC_ORIGIN__/codex-assistant/health' | python3 -c 'import json,sys; assert json.load(sys.stdin)["protocolVersion"] == "codex-assistant.v3"'
 mapfile -t releases < <(sudo find "$app/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | awk '{print $2}')
 for old in "${releases[@]:5}"; do sudo rm -rf -- "$old"; done
 sudo rm -f "$archive" "$unit" "$snippet"
 echo "CodexAssistant production release active: $release"
 echo "RecoveryBackup=$backup"
 '@
-        $remote = $remote.Replace('__RELEASE__', $release).Replace('__SHA256__', $sha256).Replace('__TMP__', $remoteTmp)
+        $remote = $remote.Replace('__RELEASE__', $release).Replace('__SHA256__', $sha256).Replace('__TMP__', $remoteTmp).Replace('__PUBLIC_ORIGIN__', $PublicOrigin).Replace('__NGINX_CONFIG__', $NginxConfig)
         $remote | ssh -o BatchMode=yes $Server "tr -d '\r' | bash -s"
         if ($LASTEXITCODE) { throw 'CodexAssistant production deployment failed.' }
         Write-Output "ProductionRelease=$release`nArchiveSha256=$sha256"

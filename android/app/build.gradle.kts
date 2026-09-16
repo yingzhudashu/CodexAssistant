@@ -30,7 +30,8 @@ android {
         getByName("debug") { buildConfigField("String", "CODEX_BASE_URL", "\"http://127.0.0.1:3240\""); manifestPlaceholders["usesCleartextTraffic"] = true }
         getByName("release") {
             isMinifyEnabled = true
-            buildConfigField("String", "CODEX_BASE_URL", "\"https://server.example.com\"")
+            // 正式版首次启动由用户填写地址，不将私人服务器编入安装包。
+            buildConfigField("String", "CODEX_BASE_URL", "\"\"")
             manifestPlaceholders["usesCleartextTraffic"] = false
             signingConfig = signingConfigs.getByName("release")
         }
