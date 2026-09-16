@@ -6,6 +6,8 @@ Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和
 
 下载：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)（未签名）、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)（Release签名）。Android 2.0.16修复后台通知合并、重连补报和长期订阅，新增设置→通知→允许后台持续连接。两份文件已通过公网完整下载SHA-256校验；安装及真机运行的覆盖范围见[验收记录](docs/acceptance.zh-CN.md)。
 
+升级指引：Windows 已安装 2.0.16 可继续使用，低于该版本应更新；Android 应安装 2.0.16/code19 获取后台通知修复。安装后打开 Android 应用，在设置→通知检查通知权限和“允许后台持续连接”。服务器部署不会自动更新设备上的应用，详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
+
 ## 使用边界
 
 - 当前部署面向一个工作站、共享 Token 的个人使用。Token 持有者具有同等访问权限，不提供多用户隔离。只允许一个在线工作站控制器，不支持多个工作站同名任务的合并。

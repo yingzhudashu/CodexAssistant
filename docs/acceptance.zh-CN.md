@@ -40,7 +40,7 @@ Electron合成验收通过preload、设置、深色状态、交互提交、消�
 
 Debug APK位于android/app/build/outputs/apk/debug，模拟器功能与网络恢复测试使用此构建。Android 2.0.16/code19 Release已重新构建并发布，通过apksigner v2签名校验，大小2204959字节，最终发布SHA-256为 `4a34425d7abd7fb2603df46e18ab3d05e52c9c6f984547b941bdc25cbc084e5a`；Release包完成专用模拟器安装和启动验收，业务网络及通知场景仍以Debug测试为准。
 
-Windows 2.0.16 NSIS已重新构建并发布（NotSigned），大小112034848字节，最终发布SHA-256为 `ac4149b936156bbc6ed3e6e0a2f1858ad19a6aa894ce74366fcd1856c2b53190`，本轮未执行安装器。两个安装包的哈希与大小均保存在各自产物manifest及公网联合清单。两端安装包均经公网HTTPS完整下载比对哈希，清单在两份文件校验后原子替换，本机再次校验清单文本和no-store响应头。安装包、截图和原始报告位于忽略的artifacts目录，不提交Git。
+Windows 2.0.16 NSIS在性能与Trace优化交付时构建并发布（NotSigned），大小112034848字节，最终发布SHA-256为 `ac4149b936156bbc6ed3e6e0a2f1858ad19a6aa894ce74366fcd1856c2b53190`。后续Android通知修复及服务端重新部署均复用该安装包；服务部署时通过Windows源码编译，未重新打包NSIS，未执行安装器。两个安装包的哈希与大小均保存在各自产物manifest及公网联合清单。两端安装包均经公网HTTPS完整下载比对哈希，清单在两份文件校验后原子替换，本机再次校验清单文本和no-store响应头。安装包、截图和原始报告位于忽略的artifacts目录，不提交Git。
 
 生产服务器 `deployment-host` 当前release为 `private-release-id`，配置恢复备份位于 `/var/backups/codex-assistant/private-release-id`。2026-09-16从提交 `source-commit` 重新构建协议、服务端和桌面端，部署归档SHA-256为 `private-deployment-archive-sha256`。同schema保留现有任务；验收快照游标已核验，只读检查期间业务事件数未变化。公网health、未授权401、授权HTTP快照、WSS鉴权/订阅/释放、HTTP Trace父节点和非法查询422均通过，只读验收业务写入0。检查时service为active/running、自动重启0、Trace导出失败0。两端安装包复用已发布文件，本地及服务器SHA-256与公网联合清单再次核验一致，清单no-store响应头有效。该检查确认部署与读取链路，不代替真实客户端发送或生产容量测试。
 

@@ -13,7 +13,7 @@
 |[性能](performance.zh-CN.md)|优化设计、目标、测量口径与限制|
 |[安全](security.zh-CN.md)|凭据、信任边界、脱敏与发布材料|
 |[运维](operations.zh-CN.md)|配置、故障定位、备份和恢复|
-|[发布](release.zh-CN.md)|版本、构建、签名、清单与回滚|
+|[发布](release.zh-CN.md)|版本、客户端升级指引、构建、签名、清单与回滚|
 |[验收](acceptance.zh-CN.md)|当前验证结果与未覆盖范围|
 |[部署模板](../deploy/README.md)|systemd、Nginx 与目录约定|
 |[验收脚本](../scripts/acceptance/README.md)|隔离环境和可重复执行命令|
