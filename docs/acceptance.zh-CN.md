@@ -42,7 +42,7 @@ Debug APK位于android/app/build/outputs/apk/debug，模拟器功能与网络恢
 
 Windows 2.0.16 NSIS已重新构建并发布（NotSigned），大小112034848字节，最终发布SHA-256为 `ac4149b936156bbc6ed3e6e0a2f1858ad19a6aa894ce74366fcd1856c2b53190`，本轮未执行安装器。两个安装包的哈希与大小均保存在各自产物manifest及公网联合清单。两端安装包均经公网HTTPS完整下载比对哈希，清单在两份文件校验后原子替换，本机再次校验清单文本和no-store响应头。安装包、截图和原始报告位于忽略的artifacts目录，不提交Git。
 
-生产服务器 `deployment-host` 当前release为 `private-release-id`，配置恢复备份位于 `/var/backups/codex-assistant/private-release-id`。服务端该次部署同schema保留现有任务；本次Android通知补丁不修改服务端业务数据。公网health、未授权401、授权HTTP快照、WSS鉴权/订阅/释放、HTTP Trace父节点和非法查询422均通过，只读验收业务写入0。检查时service为active/running、自动重启0、Trace导出失败0。该检查确认部署与读取链路，不代替真实客户端发送或生产容量测试。
+生产服务器 `deployment-host` 当前release为 `private-release-id`，配置恢复备份位于 `/var/backups/codex-assistant/private-release-id`。2026-09-16从提交 `source-commit` 重新构建协议、服务端和桌面端，部署归档SHA-256为 `private-deployment-archive-sha256`。同schema保留现有任务；验收快照游标已核验，只读检查期间业务事件数未变化。公网health、未授权401、授权HTTP快照、WSS鉴权/订阅/释放、HTTP Trace父节点和非法查询422均通过，只读验收业务写入0。检查时service为active/running、自动重启0、Trace导出失败0。两端安装包复用已发布文件，本地及服务器SHA-256与公网联合清单再次核验一致，清单no-store响应头有效。该检查确认部署与读取链路，不代替真实客户端发送或生产容量测试。
 
 已删除设计source-baseline、artifact-manifest、validation和review四份过程文件，生成工具改为把报告写artifacts。旧review-preview.png的删除被自动安全审查拒绝（仅返回blocked by policy），已解除引用但暂未删除。其余历史忽略产物可由清理脚本预览后清除；本轮最终产物保留供审查。
 
