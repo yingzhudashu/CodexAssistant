@@ -39,7 +39,7 @@ try {
   await server.request('turn/start', { threadId: started.thread.id, input: [{ type: 'text', text: 'This is an isolated protocol acceptance test. Use request_user_input now to ask one question with two options named Alpha and Beta. Do not call any other tools or inspect files. After receiving the answer, reply only DONE.' }], collaborationMode: { mode: 'plan', settings: { model, reasoning_effort: "low", developer_instructions: null } } });
   await Promise.race([completed, new Promise<void>((_, reject) => { timeout = setTimeout(() => reject(new Error('ACCEPTANCE_TIMEOUT')), 180_000); })]);
 } catch (error) { report.error = error instanceof Error ? error.message : 'ACCEPTANCE_FAILED'; }
-finally { if (timeout) clearTimeout(timeout); await server.stop(); await writeFile('artifacts/acceptance-2026-09-10/official-smoke.json', JSON.stringify(report, null, 2) + '\n'); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(() => { report.cleanup = 'temporary directory still locked'; }); }
-await writeFile('artifacts/acceptance-2026-09-10/official-smoke.json', JSON.stringify(report, null, 2) + '\n');
+finally { if (timeout) clearTimeout(timeout); await server.stop(); await writeFile('artifacts/acceptance/official-smoke.json', JSON.stringify(report, null, 2) + '\n'); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(() => { report.cleanup = 'temporary directory still locked'; }); }
+await writeFile('artifacts/acceptance/official-smoke.json', JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify(report));
 if (!report.requestReceived || !report.completed) process.exitCode = 1;

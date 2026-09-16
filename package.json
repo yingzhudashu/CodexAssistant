@@ -17,14 +17,19 @@
     "check:docs": "node scripts/check-docs.mjs",
     "dev:server": "npm run dev --workspace=@codex-assistant/server",
     "dev:desktop": "npm run dev --workspace=@codex-assistant/desktop",
-    "perf:server": "node --import tsx scripts/perf-server.mjs"
+    "perf:server": "node --import tsx scripts/perf-server.mjs",
+    "check:format": "prettier --check \"apps/*/src/**/*.{ts,cts,js,css,html}\" \"packages/*/src/**/*.ts\"",
+    "format": "prettier --write \"apps/*/src/**/*.{ts,cts,js,css,html}\" \"packages/*/src/**/*.ts\"",
+    "check:design": "node scripts/check-design-contract.mjs",
+    "test:ui": "npm run build && electron scripts/acceptance/electron-smoke.cjs",
+    "test:endurance": "node --import tsx scripts/acceptance/server-endurance.ts"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
     "@types/ws": "8.18.1",
+    "prettier": "3.9.6",
     "tsx": "4.22.1",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
-  },
-  "dependencies": {}
+  }
 }

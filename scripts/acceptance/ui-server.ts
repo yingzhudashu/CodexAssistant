@@ -32,14 +32,15 @@ const send = (v: unknown) => ws.send(JSON.stringify(v));
 ws.on('open', () => send({ type: 'auth', protocolVersion: 'codex-assistant.v3', token }));
 ws.on('message', async data => {
   const m = JSON.parse(String(data));
-  if (m.type === 'authenticated') { send({ type: 'subscribe', protocolVersion: 'codex-assistant.v3', after: 0 }); send({ type: 'role', role: 'desktop' }); send(pending.request); }
+  if (m.type === 'authenticated') { send({ type: 'subscribe', protocolVersion: 'codex-assistant.v3', after: 0 }); send({ type: 'role', protocolVersion: 'codex-assistant.v3', role: 'desktop' }); send(pending.request); }
   if (m.type === 'interaction.submit') {
     try {
       const official = interactionResponse(pending, m.value);
-      await writeFile('artifacts/acceptance-2026-09-10/android-roundtrip.json', JSON.stringify({ received: true, officialResponseValidated: true, cancelled: official.cancel }, null, 2));
+      await writeFile('artifacts/acceptance/android-roundtrip.json', JSON.stringify({ received: true, officialResponseValidated: true, cancelled: official.cancel }, null, 2));
       send({ type: 'interaction.result', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, status: official.cancel ? 'cancelled' : 'submitted' });
     } catch { send({ type: 'interaction.result', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, status: 'failed', error: '请选择至少两项并填写说明' }); }
   }
+  if (m.type === 'detail') send({ type: 'detail', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, turns: [{id:'synthetic-turn',status:'completed',items:[{type:'agentMessage',text:'合成验收摘要：连接、详情和消息回执可用。'}]}] });
   if (m.type === 'send') send({ type: 'result', protocolVersion: 'codex-assistant.v3', requestId: m.requestId, threadId: m.threadId, status: 'started' });
 });
 console.log('Synthetic UI acceptance server ready on loopback port 33241');

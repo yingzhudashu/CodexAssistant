@@ -1,6 +1,6 @@
 """Render a self-contained project frontend specification. Run in its own directory."""
 from pathlib import Path
-import json, html, re, hashlib
+import json, html, re
 
 HERE=Path(__file__).resolve().parent
 SPEC=json.loads((HERE/'spec.json').read_text(encoding='utf-8'))
@@ -201,8 +201,8 @@ def confirmation_art():
         ('离线 / 有缓存','保留上次同步内容；本地操作仍可用。','编辑连接'),
         ('读取失败','显示持续错误区；重试原来的只读查询。','重试读取'),
         ('写入结果未确认','保留输入；查询原资源，不能自动重发。','查询状态'),
-        ('权限不足 / 403','显示权限不足；重试不能提升权限。','返回'),
-        ('请求过多 / 429','读取 Retry-After；倒计时结束后允许手动重试。','等待倒计时')]
+        ('认证错误','停止重试，修改正确凭据后再连接。','编辑连接'),
+        ('工作站请求繁忙','控制路由已满，本次没有转发。','稍后重试')]
     for i,(title,body,label) in enumerate(entries):
         x=32+(i%3)*460;y=90+(i//3)*340
         b+=rect(x,y,436,310,T['surface'],12)
@@ -217,10 +217,10 @@ def confirmation_art():
 def render():
     ime,theme=system_art()
     confirmations=confirmation_art()
-    md=[f'# {NAME} 前端设计实施规格 · Final 1.0',SPEC['intro'],
-        '> 文档冻结日期：2026-09-09。本文是目标设计合同，不代表当前代码已实现全部目标行为。设计图为可编辑 SVG 结构稿，不是产品运行截图，也不是 ImageGen 输出。',
+    md=[f'# {NAME} 前端设计实施规格',SPEC['intro'],
+        '> 本文由 spec.json 生成，描述当前工作树。SVG为可编辑结构示意，实际验收以运行截图和测试为准。',
         SPEC.get('revision',''),
-        '[图文阅读版与界面索引](frontend-design/index.html) · [结构化界面规格](frontend-design/spec.json) · [审查与验收记录](frontend-design/review.md)',
+        '[图文阅读版与界面索引](frontend-design/index.html) · [结构化界面规格](frontend-design/spec.json) · [审查与验收记录](acceptance.zh-CN.md)',
         '## 1. 权威顺序与实施范围',SPEC['scope'],
         '同一交付中：交互表和字段规则 > 几何规范 > SVG 示例值。示例值是合成测试数据，不是默认业务数据。业务状态只取服务端或本地桥接回执；画面不允许推断业务成功。若未来协议改变，必须升级本文件与 spec.json；不得让开发者自行猜测一个静默替代行为。',
         '## 2. 现状证据与设计差额',SPEC['findings'],
@@ -254,9 +254,9 @@ def render():
         md+=lines
         gallery.append((s,figs,lines))
     md+=['## 6. 平台与系统级行为',SPEC['platforms'],'## 7. 发布验收门槛',SPEC['acceptance'],
-        '## 8. 来源快照与复刻方法',
-        '所有相对源码路径相对于当前项目根目录。渲染命令：`python docs/frontend-design/render.py`。静态复核命令：`python docs/frontend-design/validate.py`（Python 3、playwright、Pillow，以及本机Microsoft Edge）。渲染只写当前项目的设计文档和 final 图稿；不会写产品源码或请求外部接口。源码 SHA-256 与 HEAD 记录在 source-baseline.json，包含本次审查时的工作区内容，不等同于只读已提交版本。',
-        '设计方法参考：[imagegen-frontend-mobile](https://github.com/diuzhev26-glitch/imagegen-frontend-mobile)。采用其平台原生、可读性、连续屏幕一致性要求；本交付为精确 SVG 线框/结构图，未调用外部绘图服务。']
+        '## 8. 维护方法',
+        '所有源码路径相对于项目根目录。运行 `python docs/frontend-design/render.py` 重建图文，运行 `python docs/frontend-design/validate.py` 静态校验。需要Python 3标准库，不读取历史源码哈希或过程截图。实际视觉验收使用Electron和Android专用模拟器。',
+        '逐页操作与协议同步修改，不在生成文档中手工追加旧版记录。']
     full=re.sub(r'(?m)(?<=\|)\n(?:[ \t]*\n)+(?=\|)', '\n', '\n\n'.join(md))
     (DOC/'frontend-design.zh-CN.md').write_text(full+'\n',encoding='utf-8',newline='\n')
     # Full markdown rendered with a bundled zero-dependency table/image renderer.
@@ -287,6 +287,6 @@ def render():
         flush();return ''.join(out)
     nav=''.join(f'<a href="#{s["id"].lower()}">{s["id"]} {s["title"]}</a>' for s in SPEC['screens'])
     css=f'body{{margin:0;background:{T["bg"]};color:{T["text"]};font:16px/1.7 "Microsoft YaHei","Segoe UI",sans-serif}}aside{{position:fixed;width:244px;top:0;bottom:0;padding:24px 16px;overflow:auto;background:{T["surface"]}}}aside a{{display:block;padding:8px;font-size:13px}}main{{margin-left:280px;padding:32px;max-width:1440px}}a{{color:{T["primary"]}}}img{{max-width:100%;max-height:900px;display:block;margin:20px auto;background:white;border:1px solid {T["border"]}}}.table{{overflow:auto}}table{{border-collapse:collapse;width:100%}}td,th{{border:1px solid {T["border"]};padding:12px;vertical-align:top;min-width:110px}}h2{{margin-top:70px;border-top:2px solid {T["border"]};padding-top:24px}}code{{word-break:break-word;background:{T["selected"]};padding:2px 5px}}@media(max-width:800px){{aside{{position:static;width:auto;max-height:230px}}main{{margin:0;padding:16px}}}}'
-    (HERE/'index.html').write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{NAME} Final 1.0</title><style>{css}</style><aside><strong>{NAME}</strong><p>Final 1.0 · 界面索引</p>{nav}</aside><main>{mdhtml(full)}</main></html>',encoding='utf-8',newline='\n')
+    (HERE/'index.html').write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{NAME}</title><style>{css}</style><aside><strong>{NAME}</strong><p>当前设计 · 界面索引</p>{nav}</aside><main>{mdhtml(full)}</main></html>',encoding='utf-8',newline='\n')
     print(NAME,len(SPEC['screens']),'screens',sum(len(s['actions']) for s in SPEC['screens']),'interactions',len(list(ASSET.glob('*.svg'))),'figures')
 if __name__=='__main__':render()

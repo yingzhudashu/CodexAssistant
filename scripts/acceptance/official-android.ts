@@ -9,7 +9,7 @@ const directory = await mkdtemp(join(tmpdir(), 'codex-official-android-'));
 const token = 'synthetic-acceptance-token';
 const relay = await createApp({ databasePath: join(directory, 'state.sqlite'), accessToken: token, logger: false });
 const report = { initialized: false, model: '', requestReceived: false, androidAnswerReceived: false, responseWritten: false, completed: false, error: '' };
-const persist = () => writeFile('artifacts/acceptance-2026-09-10/official-android.json', JSON.stringify(report, null, 2) + '\n');
+const persist = () => writeFile('artifacts/acceptance/official-android.json', JSON.stringify(report, null, 2) + '\n');
 let pending: PendingInteraction | undefined;
 let threadId = '';
 let sequence = 0;
@@ -51,7 +51,7 @@ ws = new WebSocket('ws://127.0.0.1:33241/codex-assistant/api/v3/stream');
 ws.on('open', () => send({ type: 'auth', protocolVersion: 'codex-assistant.v3', token }));
 ws.on('message', async raw => {
   const m = JSON.parse(String(raw));
-  if (m.type === 'authenticated') { send({ type: 'subscribe', protocolVersion: 'codex-assistant.v3', after: 0 }); send({ type: 'role', role: 'desktop' }); }
+  if (m.type === 'authenticated') { send({ type: 'subscribe', protocolVersion: 'codex-assistant.v3', after: 0 }); send({ type: 'role', protocolVersion: 'codex-assistant.v3', role: 'desktop' }); }
   if (m.type === 'interaction.submit' && pending && m.requestId === pending.request.requestId && m.threadId === threadId) {
     try {
       report.androidAnswerReceived = true;

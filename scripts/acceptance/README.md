@@ -1,36 +1,48 @@
-# 本地验收脚本
+# 隔离验收脚本
 
-从仓库根目录运行。测试使用临时目录和合成数据，不部署或发布。desktop-message 是明确例外：它将手动输入的验收消息发送到指定现有 Desktop 会话，必须使用用户授权的验收目标。新消息验收和 Electron 报告输出到 `artifacts/acceptance-2026-09-13/`；历史脚本仍使用各自原有目录。
+本地命令在仓库根目录执行。合成测试使用临时 SQLite、占位 Token 和专用 emulator-5580；不连接生产、不操作其他手机。生产只读检查单独列在下方，不进入默认测试命令。原始报告统一写 artifacts/acceptance（网络脚本使用 artifacts/network-recovery），不提交历史过程文件。
 
-## 自动化
+## 自动质量检查
 
 ```powershell
 npm run build
 npm test
+npm run check:format
 npm run check:docs
-node scripts/check-design-contract.mjs
+npm run check:design
 python docs/frontend-design/render.py
 python docs/frontend-design/validate.py
-node_modules\.bin\electron.cmd scripts/acceptance/electron-smoke.cjs
-node --import tsx scripts/acceptance/official-smoke.ts
-node --import tsx scripts/acceptance/desktop-message.ts <threadId>
-node --import tsx scripts/acceptance/server-endurance.ts
+npm run test:ui
+npm run perf:server
+npm run test:endurance
 ```
 
-官方测试需要本机 Codex 已具备模型访问能力。模型以 `thread/start` 的实际返回值为准，不能从模型列表猜测当前提供商的可用默认模型。`official-smoke` 使用 plan 模式、低推理强度和 ephemeral 线程，等待真实用户选项请求并回复合成答案；`desktop-message` 启动本机隔离验收中转，由实际 Android 发消息到指定 Desktop 会话；该脚本不创建新会话。诊断仅记录事件类型、耗时和错误类别，不保存账号凭据及现有会话内容。
+Electron真实renderer使用合成IPC验证，不向真实Desktop写消息。持续同步30分钟使用真实HTTP/WS、1000个任务、每5分钟重连，只有completed=true且游标/任务数匹配及RSS增长门槛通过才算完成；不是完整历史内容一致性或生产SLA验证。
 
-`server-endurance` 先通过真实 HTTP 写入 1000 个不同任务，再持续 30 分钟更新，通过真实 WebSocket 收集快照和事件，每 5 分钟重连。每分钟写入阶段报告；只有 `completed=true`、最终游标和任务数匹配才算完成。首个近零时间样本不用于稳定 CPU 结论。测试仅代表本地服务与客户端协议负载，不能外推成所有端、模型或真机的长期测试。
+设计静态检查仅需Python标准库；可选 `validate.py --visual` 需要Playwright、Pillow和本机Edge，执行所有SVG越界/HTML图片及锚点检查，报告输出到 artifacts/acceptance/design，禁止写回设计源目录。
 
-## Android 实际界面
+## Android模拟器
 
-`official-android.ts` 和 `ui-server.ts` 均监听回环端口 33241，不能同时运行。只在专用验收模拟器上操作，勿修改其他设备。
+先构建Debug APK。启动独立AVD并确认序列号emulator-5580；所有ADB命令必须带 `-s emulator-5580`。端口33241供ui-server、network-recovery-server、official-android互斥使用。
 
-1. 安装最新 Debug APK，通过 ADB reverse 将模拟器的 33241 端口映射到本机。
-2. 在应用保存地址 `http://127.0.0.1:33241`，Token 为脚本中的 `synthetic-acceptance-token`。
-3. 运行 `official-android.ts`，向 `/acceptance/start` POST JSON `{}`；打开“官方 Codex 选项验收”，等待 Alpha/Beta，选择 Alpha 并提交。以 `official-android.json` 的请求、手机答案、官方回复、回合完成四项为准。该脚本通过实际官方客户端与协议适配器接入中转；Monitor 自身另由回归覆盖。
-4. 停止官方脚本，再运行 `ui-server.ts`，可验证 MCP 多选与文本。`/acceptance/state` 接受 JSON `{"status":"running"}`（或其余三种合法状态），用于合成后台通知；`/acceptance/disconnect` 接受 JSON `{}`，以 1013 主动关闭手机连接，检查自动重连与待答表单恢复。
-5. Android 35+ 系统超时验证只在专用模拟器暂时设置 `activity_manager/data_sync_fgs_timeout_duration=10000`。重新启动测试应用服务后回到桌面，观察真实超时停止；删除该设置，再回到原 Activity，检查服务恢复。测试完成必须恢复设置。
+```powershell
+python -m venv "$env:TEMP\codexassistant-acceptance-venv"
+& "$env:TEMP\codexassistant-acceptance-venv\Scripts\python.exe" -m pip install -r scripts/acceptance/requirements.txt
+node --import tsx scripts/acceptance/ui-server.ts
+```
 
-实际界面自动化使用 uiautomator2 的可访问性文本定位；脚本辅助依赖安装在隔离的验收目录，不属于产品依赖。`set_text` 后键盘不一定打开，应先检查当前界面，再决定返回键操作。截图应等待目标页面出现及动画结束，不能把前一页误当验收截图。
+另开终端安装Debug APK，执行 `adb -s emulator-5580 reverse tcp:33241 tcp:33241`，配置根地址 `http://127.0.0.1:33241` 与 Token `synthetic-acceptance-token`，进入“移动端验收任务”，运行虚拟环境Python的 `scripts/acceptance/android-smoke.py`。它提交合成多选/文本、读详情、发合成消息并验证草稿和主题；ui-server不调用真实Codex。
 
-物理设备、厂商电池策略、真实声音和屏幕阅读器完整操作不由模拟器通过结果替代。当前用户明确接受暂时没有真机，保留这些限制。
+停止ui-server后启动 `node --import tsx scripts/acceptance/network-recovery-server.ts`，打开应用再运行 `android-network-recovery.py`。脚本检查20次前后台新快照、3次断网恢复、服务端关闭恢复和writes不增长。恢复原先启用的网络接口，finally恢复测试前设置；没有连接Wi-Fi的AVD不能靠只启用Wi-Fi恢复蜂窝网络。
+
+`android-ui.py` 提供dump/tap/fill/screenshot/back，用可访问性树定位。测试后关闭本轮启动的模拟器和本地服务器。物理设备、OEM电池策略、读屏、真实锁屏声音仍需独立验收。
+
+## 真实Codex边界
+
+`official-smoke.ts` 会创建临时官方线程并驱动选项交互；`official-android.ts` 会通过官方线程完成手机回答；`desktop-message.ts <threadId>` 会向指定现有Desktop会话发送消息。这些脚本可能调用模型或写真实会话，**默认质量命令不执行**，必须先明确授权验收目标。只读启动/list/Goal验证不等于真实消息发送验证。本轮没有向真实会话发消息。
+
+## 生产部署后只读检查
+
+完成目标服务器部署后，将 `production-readonly.mjs` 复制到该服务器临时目录，再使用 `/opt/node-v22.23.2-linux-x64/bin/node` 执行。执行用户需能读取 `/etc/codex-assistant/codex-assistant.env`；脚本复用当前 release 的 ws 依赖。执行结束删除本次上传的脚本。
+
+检查范围包括公网 health、未授权请求401、授权任务快照、WSS鉴权/订阅/释放、HTTP Trace父节点及非法查询422。脚本不发送业务事件或控制消息，凭据不离开服务器；诊断请求仍会产生正常Trace记录。输出仅为布尔结果与数量，不包含真实任务正文或标识。为可靠比较HTTP/WS计数和业务事件数，选择业务上传空闲窗口；并发业务变更可能使一致性断言失败，需核实原因，不能自动重置数据。

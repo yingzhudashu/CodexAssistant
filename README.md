@@ -1,93 +1,62 @@
 # CodexAssistant
 
-CodexAssistant 是独立的 Codex 任务进度同步工具：Windows Electron 托盘端通过官方 `codex app-server` JSON-RPC 读取线程元数据，并从其返回的本机会话文件中增量提取开始、完成和中止事件，完成脱敏后通过 HTTPS 上传；Fastify 服务端写入 SQLite 并以 WebSocket 推送；Android Compose 客户端显示任务与本地通知，通过前台服务保持同步。
+Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和 HTTPS 上传，由 Fastify/SQLite 服务保存，再以 WebSocket 同步给 Android。Windows 和 Android 均支持执行计划、按需回合摘要、消息发送、结构化交互、连接设置及主题切换。
 
-当前发布版本（2026-09-13）：Windows **2.0.15**、Android **2.0.14**（Android versionCode **17**）；协议为 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端和协议包的 npm 版本仍为 2.0.0，不代表客户端安装包版本。
+发布状态：**已发布**。当前 Windows **2.0.16**、Android **2.0.15**（Android versionCode **18**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。2026-09-16 已部署生产服务并更新公网联合下载清单；服务 release 为 `private-release-id`。
 
-- [Windows 安装包](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.15.exe)（未签名）
-- [Android APK](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.14.apk)（release 签名）
-- [在线更新清单](https://server.example.com/codex-assistant/downloads/manifest.json)
+下载：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)（未签名）、[Android 2.0.15](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.15.apk)（Release签名）。两份文件已通过公网完整下载SHA-256校验；安装及真机运行的覆盖范围见[验收记录](docs/acceptance.zh-CN.md)。
 
-Windows 与 Android 填写同一站点根地址，例如 `https://server.example.com`，以及服务端配置的访问 Token。不要在地址末尾追加 API 路径。两端均提供检查更新与下载入口，下载由系统浏览器处理。
+## 使用边界
 
-## 当前版本边界
+- 当前部署面向一个工作站、共享 Token 的个人使用。Token 持有者具有同等访问权限，不提供多用户隔离。只允许一个在线工作站控制器，不支持多个工作站同名任务的合并。
+- Windows 通过官方 `codex app-server` 读取元数据与详情，通过其明确返回的 rollout 文件补充生命周期证据。不读取 Codex 数据库。
+- 普通消息经本机 Codex Desktop 的 app-tools 管道提交，必须保持 Desktop 运行。该管道不是公开稳定 API，需随 Desktop 更新验收。`started` 只表示接受消息，不表示回合完成。
+- 自动同步不上传完整对话、命令正文、输出、绝对路径或隐藏推理。用户主动发送的消息、主动读取的摘要与结构化交互会经服务透传。
+- Android 用前台服务、唯一 WebSocket 和系统通知同步；设备系统决定后台执行和通知权限。
+- 所有端仅接受当前协议。旧 schema、未知字段、损坏 outbox 直接报错，不提供迁移、兼容层或静默重置。
 
-- 协议固定为 `codex-assistant.v3`，未知字段、错误协议版本和旧 SQLite schema 直接拒绝。
-- 任务状态同时包含 Goal 状态、官方线程运行态、active flags、最近 Turn 结果和数据新鲜度；明确失败/等待与当前活动证据优先于历史回合；完整优先级按[状态规则](docs/protocol.zh-CN.md)处理。
-- 本机历史开始记录不永久等于运行中：普通静默回合 30 分钟后进入待确认；当前回合仍有 `inProgress` 操作时会保留进行中状态最多 6 小时，并以缓存状态展示。明确的官方运行状态不受这些窗口影响。
-- 自动状态同步不上传完整对话、文件内容、命令正文/输出、绝对路径或隐藏推理。用户主动发送的正文和按需读取的回合摘要经中转透传。
-- 消息由工作站 Codex Desktop 接收；必须保持官方 Desktop 运行。消息回执仅表示接受，任务进展单独读取；Desktop 自己的审批仍在 Desktop 处理。
-- Android 使用前台服务保持 WebSocket 常驻，并由系统本地通知呈现任务变化；不依赖第三方推送账号。
+## 开发
 
-## 目录
-
-- `packages/protocol`：TypeBox 严格协议、trace context 和错误码。
-- `apps/server`：Fastify API、SQLite、HTTP/WebSocket 鉴权、幂等 ingest、游标回放和 trace 查询。
-- `apps/desktop`：Electron 主进程、app-server RPC、轮询缓存、脱敏、outbox、托盘和任务窗口。
-- `android`：Compose Material 3、OkHttp WebSocket、Keystore 凭据和断线游标恢复。
-- `deploy`：systemd、Nginx 和发布说明。
-- `docs`：架构、协议、追踪、性能、安全、运维和验收文档。
-- `docs/release.zh-CN.md`：Android APK、Windows NSIS 和下载发布要求。
-- `scripts`：生产服务部署、Android release 和 Windows 安装包构建脚本。
-
-## 本地开发
-
-需要 Node.js **22.19.0 或以上**、已登录的官方 Codex，以及能执行 `codex app-server` 的环境。本机会话生命周期已在 Codex **0.153.4** 上验证；它不是跨进程实时状态订阅接口，限制见[架构说明](docs/architecture.zh-CN.md)。Windows 脚本需要 PowerShell。Android 构建需要 JDK 17 或以上、Android SDK 35 和仓库内的 Gradle Wrapper，应用最低支持 Android 8（API 26）；SDK 路径通过本地 `android/local.properties` 或环境变量配置，不提交版本库。
+需要 Node.js ≥22.19.0、npm、已登录且可执行 `codex app-server` 的官方 Codex。Android 使用 JDK 17、Android SDK 35 和仓库 Gradle Wrapper，最低 API 26。Windows 脚本使用 PowerShell。`CODEX_BIN` 可指定官方可执行文件位置。
 
 ```powershell
 npm ci
 npm run build
 npm test
+npm run check:format
 npm run check:docs
-$env:CODEX_ASSISTANT_ACCESS_TOKEN = 'replace-with-a-long-token'
+npm run check:design
+$env:CODEX_ASSISTANT_ACCESS_TOKEN = 'replace-with-a-long-random-token'
 $env:CODEX_ASSISTANT_STATE_DIR = (Join-Path $PWD '.state')
 npm run dev:server
 ```
 
-服务端默认监听 `http://127.0.0.1:3240`。另开终端运行 `npm run dev:desktop`，首次启动时填写服务地址和同一个 Token。若 `codex` 不在 PATH，可设置 `CODEX_BIN` 为可执行文件路径。
-
-Windows 关闭主窗口后仍在托盘采集，使用托盘菜单“退出”停止。桌面“已连接”只表示一次采集轮询结束，不保证 outbox 已上传清空；手机必须收到服务端 snapshot 才显示已连接。排查同步延迟时按[运维手册](docs/operations.zh-CN.md)核对三端。
-
-Android 调试构建：
+服务默认监听 `127.0.0.1:3240`；另开终端运行 `npm run dev:desktop`。两端配置相同 HTTPS **根地址**及 Token，不追加 API 路径；本地调试允许回环 HTTP。关闭 Windows 窗口后托盘继续采集，托盘菜单“退出”才停止。
 
 ```powershell
 cd android
-.\gradlew.bat :app:assembleDebug --no-daemon
+.\gradlew.bat checkKotlinFormat :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-## 生产部署
+Kotlin格式化使用Gradle维护工具 `formatKotlin` / `checkKotlinFormat`（ktfmt 0.64），不进入APK；TS/JS/CSS/HTML使用Prettier。
 
-生产服务监听回环地址 `127.0.0.1:3240`，公网入口为 `https://server.example.com/codex-assistant/`。使用 `deploy/codex-assistant.service` 和 `deploy/nginx-codex-assistant.locations.conf`，staging 必须使用独立端口、状态目录、域名和 Token。完整步骤见 [`docs/operations.zh-CN.md`](docs/operations.zh-CN.md)。
+模拟器通过 `adb -s emulator-5580 reverse tcp:33241 tcp:33241` 访问隔离验收服务，地址 `http://127.0.0.1:33241`。不得把真实会话或用户手机作为默认自动测试目标。
 
-从当前工作树发布服务：
+## 项目结构与质量入口
 
-```powershell
-.\scripts\deploy-production.ps1
-```
+|目录|职责|
+|---|---|
+|packages/protocol|TypeBox 协议与诊断安全规则|
+|apps/server|HTTP、WebSocket 路由、SQLite、实例级 OTel|
+|apps/desktop|Electron、官方读取、Desktop 消息通道、持久化队列与界面|
+|android|Compose、连接协调、OkHttp、Keystore、本地通知|
+|docs|当前设计、协议、运维、验收；前端规格可重新生成|
+|deploy / scripts|部署模板、构建、质量检查和隔离验收|
 
-脚本会构建、校验 SHA-256、安装不可变 release、配置 systemd/Nginx，并检查回环和公网 health。首次部署会在服务器 `/etc/codex-assistant/codex-assistant.env` 随机生成 Token；通过受控 SSH 读取后分别配置桌面端和 Android。
+完整入口见 [文档索引](docs/README.md)。[验收记录](docs/acceptance.zh-CN.md)区分实测、目标和限制；[性能说明](docs/performance.zh-CN.md)给出负载口径，不能把本机数据当生产 SLA。
 
-失败回滚有边界：只在脚本已记录上一 release 后才能切回；systemd unit 和 Nginx snippet 不会自动恢复，详见[发布说明](docs/release.zh-CN.md)。生产配置变更前需另行备份这些文件。
+## 构建、部署与清理
 
-Android 发布包需通过签名校验；当前 Windows 发布包未签名。真实设备后台验收与构建结果分别记录，详见发布和验收文档。
+安装包构建见 [发布说明](docs/release.zh-CN.md)，服务配置见 [部署说明](deploy/README.md)和[运维手册](docs/operations.zh-CN.md)。本地构建不发布；运行 `scripts/deploy-production.ps1` 才会修改目标服务器。
 
-## 质量与性能
-
-桌面轮询固定 2 秒，但仅在线程元数据或计划修订变化时重新读取详情；详情 RPC 最大并发 8、单请求超时 15 秒。上传有 10 秒超时、指数退避和 5000 条 outbox 上限。服务端限制 HTTP body 128 KiB、WebSocket 入站消息 128 KiB；单次回放最多 500 条，随后由快照校准最新状态，并在 health 接口返回 RSS、订阅数和数据库计数。桌面 Trace 追加到本地 JSONL，Android 使用内存队列上传；只有服务端接入 OpenTelemetry SDK。服务端保留最近十万条 span，其他限制见 [Trace 说明](docs/trace.zh-CN.md)。见 [`docs/performance.zh-CN.md`](docs/performance.zh-CN.md)。
-
-## 文档入口
-
-- [架构与状态来源](docs/architecture.zh-CN.md)、[协议和时间语义](docs/protocol.zh-CN.md)
-- [Trace](docs/trace.zh-CN.md)、[性能与测试范围](docs/performance.zh-CN.md)、[安全边界](docs/security.zh-CN.md)
-- [部署配置](deploy/README.md)、[运维排查](docs/operations.zh-CN.md)、[安装包发布](docs/release.zh-CN.md)
-- [已验证能力与待验收事项](docs/acceptance.zh-CN.md)
-
-## 工作区清理
-
-关闭本项目的构建、测试和调试进程后，在 Windows 运行 `npm run clean -- -WhatIf` 预览，再运行 `npm run clean`。它删除固定的 build/dist、TypeScript 增量文件、Android 项目缓存、测试报告和整个 `artifacts`（包括本地 APK/EXE、截图和临时清单），并拒绝跟随目录链接。安装包应先发布或保存到工作区之外。
-
-清理保留 node_modules、Gradle Wrapper、Android local.properties、业务 `.state`、已安装客户端数据与仓库外签名材料。清理后运行 `npm run build` 重建；`npm test` 会自行构建协议包。Git 只提交源码、测试、脚本、必要资源和当前文档。
-
-## 约束
-
-本项目只管理 CodexAssistant 自己的状态和数据库。数据库 schema 不匹配时必须重新部署干净状态，不提供 migration、兼容层或旧协议 fallback。Android 后台通知采用前台服务，系统通知权限和电池策略由用户设备控制。
+停止本项目构建及调试进程后，用 `npm run clean -- -WhatIf` 预览，再运行 `npm run clean`。清理固定生成目录（含整个 artifacts 内的安装包与验收截图）、构建缓存和报告；保留依赖、业务 `.state`、Gradle Wrapper、本地 SDK 配置和仓库外签名材料。需要保存的最终产物先复制到工作区外。源码仓库不保存阶段报告、历史截图或发布过程日志。

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,8 +10,9 @@ import { PROTOCOL_VERSION } from '@codex-assistant/protocol';
 const directory = await mkdtemp(join(tmpdir(), 'codex-endurance-'));
 const token = 'synthetic-endurance-token';
 const server = await createApp({ databasePath: join(directory, 'state.sqlite'), accessToken: token, logger: false });
-const reportPath = 'artifacts/acceptance-2026-09-10/server-endurance.json';
-const report = { completed: false, durationMs: 0, events: 0, snapshots: 0, reconnects: 0, tasks: 0, samples: [] as unknown[], error: '' };
+const reportPath = 'artifacts/acceptance/server-endurance.json';
+await mkdir('artifacts/acceptance', { recursive: true });
+const report = { completed: false, durationMs: 0, events: 0, snapshots: 0, reconnects: 0, tasks: 0, samples: [] as Array<{ elapsedMs: number; rssBytes: number; cpuPercentOneCore: number; ingestP95Ms: number; cursor: number; taskCount: number }>, error: '' };
 let peer: WebSocket | undefined;
 let cursor = 0;
 let sequence = 0;
@@ -28,7 +29,7 @@ try {
     const ws = new WebSocket(base.replace('http:', 'ws:') + '/stream'); peer = ws;
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('SNAPSHOT_TIMEOUT')), 10_000);
-      ws.once('error', reject);
+      ws.once('error', error => { clearTimeout(timer); reject(error); });
       ws.on('open', () => ws.send(JSON.stringify({ type: 'auth', protocolVersion: PROTOCOL_VERSION, token })));
       ws.on('message', raw => {
         const m = JSON.parse(String(raw));
@@ -55,7 +56,8 @@ try {
   await connect();
   for (let i = 0; i < 1000; i++) await ingest(i);
   const started = Date.now(); const cpuStarted = process.cpuUsage();
-  let nextSample = 0;
+  latencies.length = 0;
+  let nextSample = 60_000;
   let nextReconnect = 5 * 60_000;
   while (Date.now() - started < 30 * 60_000) {
     await ingest(sequence % 1000);
@@ -75,6 +77,9 @@ try {
   report.durationMs = Date.now() - started;
   report.tasks = states.size;
   if (cursor !== sequence || states.size !== 1000) throw new Error('FINAL_SNAPSHOT_MISMATCH');
+  const stable = report.samples.slice(1);
+  const rssGrowth = stable.at(-1)!.rssBytes - stable[0].rssBytes;
+  if (rssGrowth > 50 * 1024 * 1024) throw new Error('RSS_GROWTH_EXCEEDED_50_MIB');
   report.completed = true;
 } catch (error) { report.error = error instanceof Error ? error.message : 'ENDURANCE_FAILED'; process.exitCode = 1; }
 finally { peer?.terminate(); await server.close(); await rm(directory, { recursive: true, force: true }); await persist(); }

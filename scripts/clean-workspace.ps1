@@ -9,7 +9,8 @@ $relativeTargets = @(
     'apps/server/dist', 'apps/server/tsconfig.tsbuildinfo',
     'packages/protocol/dist', 'packages/protocol/tsconfig.tsbuildinfo',
     'android/build', 'android/app/build', 'android/.gradle', 'android/.kotlin',
-    'test-results', 'coverage', 'playwright-report'
+    'test-results', 'coverage', 'playwright-report',
+    'refactor-build.log', 'refactor-test.log', '%SystemDrive%'
 )
 $targets = @()
 foreach ($relative in $relativeTargets) {

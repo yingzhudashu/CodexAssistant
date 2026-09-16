@@ -1,183 +1,52 @@
-# CodexAssistant 升级验收记录
+# 当前审查与验收
 
-## Android 后台网络恢复
+本文件描述当前版本的本地验收与2026-09-16生产发布验证。Windows 2.0.16、Android 2.0.15/code18已发布；协议v3、schema6。没有向用户真实Codex会话发送测试消息，也没有操作连接的物理手机。
 
-本轮完成 Android 连接恢复、通知去重和任务首页下拉刷新实现；当前构建版本 Android 2.0.14（versionCode 17）。详细场景与通过条件见 [网络恢复设计](android-network-recovery.zh-CN.md)，文档审查见 [审查记录](frontend-design/review.md)。Windows、服务端、协议和 SQLite schema 未改变。
+## 改动与验收矩阵
 
-实现定义唯一连接、前台/网络唤醒、25秒总握手与15秒认证订阅期限、1至6秒退避、旧连接失效、缓存草稿保留及停止服务竞态。前后端协议无需升级；不自动重发未知结果的写操作。用户已确认的无真机限制仍保留。
-
-以下为历史实现与发布验收记录。
-
-本轮验证结果：13份 Markdown、协议契约通过；渲染13页/29交互/57图，结构检查0问题；Android 单元测试、Debug 构建和 lint 通过。专用 API 36 模拟器连续前后台切换20次均恢复（1.1-1.4秒）、断网恢复3次均完成（4.3-4.7秒，含 Wi-Fi 关联）、服务端主动关闭后1.08秒恢复；最终30次连接/30次快照/1个活动连接/0次意外业务写入。
-
-验收日期：2026-09-10。功能验收候选版本为 Windows 2.0.11、Android 2.0.9（versionCode 12）；最终发布版本为 Windows 2.0.12、Android 2.0.10（versionCode 13）。最终版本仅递增发布元数据，以避免覆盖线上已存在的同名不可变安装包；两端已重新构建，Android 签名验证及最终 43 项 Node 回归通过。唯一协议为 `codex-assistant.v3`，API 前缀为 `/codex-assistant/api/v3`，SQLite schema 为 `6`。旧协议、旧状态和旧数据库直接拒绝；没有兼容端点、migration 或 fallback。生产已按运维文档启用全新 schema 6 数据库，两端新包已发布；使用者须更新客户端。
-
-## 结论与文档验收
-
-官方模型与 Android 选项闭环、真实 start/steer 连续发送、客户端构建和回归、模拟器后台服务及通知验收均已通过。服务端 30 分钟持续同步结果见下表。**本轮本地验收不代表生产发布。** 用户确认暂时没有真机，物理设备验证保留为明确限制；模拟器结果不替代厂商 ROM 和硬件声音验证。
-
-架构、协议、前端设计、spec.json 和 review.md 已同步。设计渲染包含 13 个页面、29 个动作、57 张图；结构、链接、图片、来源哈希和页面边界检查无问题。`scripts/check-design-contract.mjs` 对照 TypeBox 字段和枚举，Markdown 检查覆盖 12 份文档。`source-baseline.json` 记录实现验收基线，不代表开发前的用户确认。
-
-## 已解决的问题
-
-- 普通消息直接提交对应会话；仅串行化同一会话的短 RPC 提交，运行中调用官方 steer，不等待上一个回合结束，不增加本地审批。
-- 保留官方全部问题，一次提交完整答案；支持单选、文本、秘密文本、补充选项、审批确认，以及受支持 MCP 表单的多选和布尔字段。
-- Windows 和 Android 共用工作站请求入口；服务端核对 requestId、threadId 和控制器，首个提交生效，重复提交回放终态。离线、未知请求、失效、无效答案及重连恢复都有明确处理。
-- 修复双向 JSON-RPC 数字 ID 相撞导致客户端请求被错误完成、首条 started 后路由丢失、回合失败误判完成、旧交互复活和旧消息回执清空新草稿。
-- 三端统一进行中、已完成、失败、待确认；筛选顺序同上，无有效运行证据归入待确认。状态证据时效与来源时间独立处理。
-- Android 设置拆分连接摘要、设备偏好和二级页面，限制宽度、提高点击目标、支持即时主题与连接修改丢弃确认。交互表单模块独立，秘密答案只在内存中保存。修复系统栏与主题不同步、安全区背景及浅色系统栏白色图标对比度问题。
-- 后续修复前台服务计数、系统超时停止/恢复和假连接状态、关闭握手、锁屏脱敏通知、慢订阅者静默丢广播、长中文消息字节限制、Windows 更新误报、无 Monitor 时无法退出及关闭期间 outbox 并发写入。
-- 删除过时 Windows renderer、旧状态映射和连接 URL 兼容行为。升级 Electron 和 ws；依赖审计无已知漏洞。
-
-## 可重复验证与证据
-
-本地证据根目录：`artifacts/acceptance-2026-09-10/`。日志、安装包、临时诊断和真实截图不提交仓库；仓库保留验收脚本与结论。
-
-| 验证项 | 结果 | 证据及边界 |
+|领域|落地内容|本轮证据|
 |---|---|---|
-| TypeScript 三工作区构建 | 通过 | 协议、服务端、Windows |
-| Node 回归 | 12 文件 / 43 项通过 | tests-followup.log；包含 RPC ID 相撞、官方表单转换、状态、消息/交互路由、幂等及旧协议拒绝 |
-| Android 单元、lint、Debug 构建 | 9 项通过；lint 无错误 | android-followup.log；工具链与依赖升级建议仍有警告 |
-| Android Release 与签名 | 通过 | android-release.log；APK 签名验证通过，APK 签名 v2 与业务协议 v3 是不同概念 |
-| Windows NSIS 打包 | 通过 | windows-package-followup.log；尚无 Authenticode 签名 |
-| Electron 实际渲染与 preload | 通过 | electron-smoke.json；设置、交互、深色、托盘图标正常，无捕获错误；IPC 使用合成数据 |
-| Android 手机界面与选项回传 | 通过 | android-roundtrip.json；模拟器经真实 Fastify/WebSocket 服务提交 MCP 多选与文本，官方适配器验证通过，终态表单消失 |
-| Android 设置、主题、返回与适配 | 通过 | android-ui-report.json；手机/1600×1200 平板、深浅色与系统栏对比度、键盘返回、继续编辑/丢弃、200% 字号滚动与关于页；仅模拟器 |
-| 性能微基准 | 通过 | perf-v3.log；1000 事件总计 3640ms，P50 2ms、P95 9ms、快照 43ms、RSS 161406976 字节；仅本地短时测试 |
-| Android 1000 任务快照与搜索 | 通过 | android-thousand-tasks.json；保存连接、加载大快照、导航和搜索第 999 个任务成功；6.02 秒包含自动化与导航开销，不是纯渲染基准 |
-| 服务端 30 分钟持续同步 | 通过 | server-endurance.json；4450 事件、1000 任务、5 次重连/7 次快照，最终游标匹配；预热后 RSS 105.0–114.1 MiB，末次累计 CPU 0.93% 单核，末分钟入站 P95 12.4ms；含 Android 大快照接入，非全链路长期基准 |
-| npm 依赖审计 | 0 漏洞 | npm audit；不能推断全部产品逻辑安全 |
-| 官方 app-server 初始化 | 通过 | 安装的 codex-cli 0.153.4 可初始化及读取列表；不保存个人会话标识 |
-| 官方模型选项闭环 | 通过 | official-smoke.json；实际 gpt-6-astra 提出选项、收到回复并完成回合，约 19 秒 |
-| 官方模型 → 服务端 → Android → 官方回合 | 通过 | official-android.json；手机实际点击 Alpha 并提交，官方回合继续完成；使用真实 app-server、协议适配器和 Fastify/WebSocket，Monitor 路由另有回归覆盖 |
-| 官方 start/steer 连续发送 | 通过 | official-steer.json；一个 turn/start 后连续两个 steer 均接受并关联同一 turn，最终完成 |
-| Android 前台服务超时与恢复 | 通过 | android-background.json；API 36 模拟器、target 35，系统 dataSync 时限缩短为 10 秒触发真实超时；服务主动停止，回到已有 Activity 后恢复并连接；测试设置已恢复 |
-| Android 后台通知与服务端关闭 | 通过 | 后台从 running→completed 正确通知，常驻计数 1→0，锁屏 publicVersion 不含任务正文；1013 关闭后重连且恢复待答表单 |
+|服务端性能|预编译语句复用、减少序列化、实例级OTel批写、业务故障隔离|隔离多任务基准通过；具体数据见性能文档|
+|传输稳定性|握手期限、连接集中释放、256控制路由/30秒期限、有界交互、初始交互逐帧回放|Node协议、路由、断线与超时回归|
+|桌面采集|outbox批写、上传预算、严格确认、Trace独立上传、日志轮转|Monitor、Trace、生命周期回归|
+|上下文链路|poll→事件→上传/HTTP/ingest/Android reducer关联|W3C父节点、上传属性过滤和失败隔离回归|
+|Electron|安全IPC、代次隔离、Markdown、保持未变DOM、清筛选/复制/清草稿|真实renderer合成IPC验收及主进程保存/迟到回调回归|
+|Android|唯一连接、网络恢复、有界回执/详情、配置代次、草稿保留、通知文本更新|16项JUnit、Debug构建/lint、专用模拟器|
+|文档|逐文档改写现状、协议/设计对齐、去历史发布与过程记录|递归链接、版本、协议字段、13功能视图/30动作/58图静态与Edge图文校验|
 
-官方 schema 来源为本机 CLI 导出的 JSON schema，并核对 [官方 app-server 文档](https://developers.openai.com/codex/app-server/)。真实模型测试使用独立临时目录与 ephemeral 线程、合成 Alpha/Beta 选项，未操作已有用户会话。验收脚本改用 thread/start 返回的实际模型、低推理强度并记录脱敏诊断后通过；此前超时的唯一原因未被证明，不将选错默认模型声明为已证实的唯一根因。
+Node最新完整回归：16个测试文件、69项通过。覆盖服务端、协议、Monitor、生命周期、交互、宿主管道、Markdown、Trace、主进程退出和配置切换。Android最新JUnit：4套件16项通过；lint为0错误16警告，保留项是target SDK及依赖更新提示，不冒充零警告，也不为消警告盲目升级整套Android工具链。
 
-## 明确保留的限制与发布门
+## 实际界面与恢复
 
-1. 官方模型闭环阻塞项已关闭。官方用户问题在真实模型与 Android 上验收；MCP 多选、审批确认、取消和异常结构使用官方 schema 夹具、协议适配器及路由回归验证，不声称每个官方模型都现场生成过每种 RPC。
-2. 独立 app-server 只拥有自己进程发出的请求，不能处理另一个官方 Codex Desktop 进程的审批。移动端不是对所有桌面私有 UI 能力的复刻。
-3. 官方没有独立 plan_select RPC；计划问题走普通问题表单。MCP 数字、格式、嵌套、URL 表单明确显示 unsupported 并允许取消，不伪造成功。
-4. 中转只允许一个工作站控制器。终态缓存最多 1000 条，进程重启后未知提交返回 expired。无官方过期时间时不编造截止时间。
-5. 用户明确选择“暂时没有真机，保留明确限制”。物理手机、国产 ROM、锁屏保活、通知声音、电池策略和屏幕阅读器完整操作未验证；系统前台服务时间限制已在模拟器实测，不能等同真实六小时耗尽或所有厂商行为。
-6. 服务端持续负载见上表；它不代表 Windows/Android/模型全链路长期资源测试。快照能恢复超过 500 条变化后的当前状态，但中间历史仍只重放最多 500 条，不承诺保存所有中间事件。慢订阅者现以 1013 关闭并重连，回归和 Android 实测通过。WebSocket 入站提高为 128KiB，20000 中文字符回归通过。损坏 outbox 停止并保留文件，不自动恢复或重置设备序号；需要有效备份。
-7. 桌面/Android 全量 OpenTelemetry、trace 树排序与桌面日志轮转属于现有能力边界，见 Trace 文档；部署回滚边界见运维文档。Windows 版本比较已改为 semver，仅提示更高有效版本。
-8. 后端及两端安装包已发布，但Android 真机覆盖安装及生产真实交互回合闭环未验收；用户日常 Windows 已完成下述本地状态恢复和生产采集同步验证。Windows 安装包未签名。部署成功路径已实测，故障自动恢复经过脚本检查，未在生产主动制造故障演练；不能把备份存在等同回滚演练通过。
+Electron合成验收通过preload、设置、深色状态、交互提交、消息接受、失败草稿、发送期间编辑、节点/焦点稳定、Markdown结构/安全、千条列表和紧凑窗口。故意拒绝一次发送会输出“验收拒绝”，属于失败分支测试。截图等待绘制后取得，并人工检查，不能只看DOM布尔值。SVG/HTML在Edge中逐图检查越界、图片加载和锚点，58图无问题。
 
-本轮模拟器曾发生系统 UI 无响应及 UI 自动化服务启动超时；恢复后完成上述最终检查。这些环境故障未计作功能通过，也未据此认定应用崩溃。测试仅控制专用 emulator-5580，未操作其他模拟器。
+Android专用emulator-5580通过多选与文本交互、摘要读取/刷新/复制、合成消息回执、返回后草稿、清空草稿和主题入口。模拟器初始System UI无响应弹窗经等待恢复；旧测试应用签名不同，仅在此专用AVD卸载重装Debug。未重置物理设备。
 
-生产部署和下载发布已完成；真机限制按用户确认保留。部署与下载证据见下节。
+网络恢复20次前后台，每次只有1个连接且有新快照，耗时1656–2281ms；3次关闭并恢复原启用接口为1000/954/859ms；服务端主动关闭后1172ms恢复。最后active=1、writes=0。第一轮脚本只启用未关联Wi-Fi导致无默认网络，已修正为恢复原接口并重跑通过，不把该测试夹具错误写成产品修复。
 
-## 2026-09-10 生产发布记录
+官方Codex仅只读验证：启动、列出线程和读取Goal成功，启动加列表约601ms；未保存真实标识或正文。实际Desktop私有发送通道由合成协议测试覆盖，**本轮未重新发送真实消息**。
 
-用户明确授权直接部署、发布安装包并提交本地 Git。本轮未推送远程仓库。
+## 性能结果
 
-- 生产 release：`private-release-id`；systemd 服务 active，当前链接指向该 release。
-- 协议：`codex-assistant.v3`；SQLite `user_version=6`。旧 schema 5 数据库停机后备份到 `/var/backups/codex-assistant/private-release-id`，未迁移旧数据。初始任务快照为空；新版工作站接入后重新采集上传。
-- 公网 HTTPS 检查：health 正常；v3 未认证任务接口 401、认证读取 200；旧 v2 任务接口 404；WSS 完成认证、订阅和快照接收。该检查未生成合成生产任务，不冒充用户设备实际会话验收。
-- 已原子发布两个版本化安装包和 UTF-8 无 BOM 联合清单；旧清单保存在同一恢复目录的 `download-manifest.json`。Windows 包未签名，Android 沿用 release 签名并验证通过。
-- 公网完整下载校验：两个安装包经 HTTPS 分段下载并按顺序合并，字节数及整文件 SHA-256 均与联合清单一致；manifest 返回 `no-store`，版本化文件返回一年 `immutable` 缓存。初始单连接 Windows 下载超时，分段完整校验最终通过，不能把超时的部分文件作为证据。
-- 本地证据：`artifacts/production-2026-09-10/live-verification.json`、`publication.json`、`download-verification.json`、`tests-final.log`；部署日志位于 `artifacts/acceptance-2026-09-10/deployment-final.log`。
+最终同任务1000事件总1570ms、p95 2.30ms；1000不同任务并发20入库p95 29.85ms；1001任务查询p95 7.34ms。30分钟1000任务/4477事件/5次重连，最终游标与数量匹配，预热后RSS72.11–114.52MiB、末次累计单核CPU0.96%。测量范围、抖动及持续进程源码范围见[性能文档](performance.zh-CN.md)，不作为全端或生产SLA。
 
-| 平台 | 发布版本 | 字节数 | SHA-256 |
-|---|---|---|---|
-| Windows | 2.0.12 | 111697766 | a70e8c17dc4d244dfdec3f746d8764a8b76f5170ae91321af16affe00471b621 |
-| Android | 2.0.10 / code 13 | 2171847 | 8e7f812ab2b4ca1e9595c4cdddd277518b15de5b5bf5a630a03a782b7f3bfc79 |
+## 构建与交付状态
 
-## Windows 升级后 OUTBOX_INVALID 修复（2026-09-10）
+Debug APK位于android/app/build/outputs/apk/debug，模拟器功能与网络恢复测试使用此构建。Android 2.0.15/code18 Release已重新构建并发布，通过apksigner v2签名校验，大小2188275字节，最终发布SHA-256为 `21ca12a115fc2acda0e32b8847919e71b7b96d6ad0430f3d6f458b59b1bcfd3c`；Release包尚未安装运行，不能把Debug运行结果表述为Release运行验收。
 
-用户安装新版后反馈离线，保存连接报 `OUTBOX_INVALID`。脱敏诊断确认旧队列 JSON 完整、deviceId 与连接一致，但剩余 2 条事件仍为 `codex-assistant.v2`，包含旧状态 idle；v3 严格校验按设计拒绝。发布流程此前遗漏了客户端本地队列的破坏性协议升级步骤。
+Windows 2.0.16 NSIS已重新构建并发布（NotSigned），大小112034848字节，最终发布SHA-256为 `ac4149b936156bbc6ed3e6e0a2f1858ad19a6aa894ce74366fcd1856c2b53190`，本轮未执行安装器。两个安装包的哈希与大小均保存在各自产物manifest及公网联合清单。两端安装包均经公网HTTPS完整下载比对哈希，清单在两份文件校验后原子替换，本机再次校验清单文本和no-store响应头。安装包、截图和原始报告位于忽略的artifacts目录，不提交Git。
 
-按运维文档退出应用，将有效连接配置和整个旧 state 保存到本机独立恢复目录；保持地址和加密 Token 不变，生成新 deviceId，再以全新队列启动已安装的 Windows 2.0.12。没有转换旧事件、重用旧序号或修改 Codex 会话文件。
+生产服务器 `deployment-host` 当前release为 `private-release-id`，配置恢复备份位于 `/var/backups/codex-assistant/private-release-id`。同schema保留现有任务。公网health、未授权401、授权HTTP快照、WSS鉴权/订阅/释放、HTTP Trace父节点和非法查询422均通过，只读验收业务写入0。检查时service为active/running、自动重启0、Trace导出失败0。该检查确认部署与读取链路，不代替真实客户端发送或生产容量测试。
 
-恢复后实测确认采集与上传链路正常；真实队列序号、业务计数和设备状态只保存在仓库外。
+已删除设计source-baseline、artifact-manifest、validation和review四份过程文件，生成工具改为把报告写artifacts。旧review-preview.png的删除被自动安全审查拒绝（仅返回blocked by policy），已解除引用但暂未删除。其余历史忽略产物可由清理脚本预览后清除；本轮最终产物保留供审查。
 
-## 历史自有回合修复记录（2026-09-11，已被新发送合同取代）
+## 未覆盖与发布门槛
 
-用户截图确认 Android 发送消息时，工作站返回 `thread ... already has an active writer`。审查发现 Monitor 对每条消息都先调用 `thread/resume`，即使自身已缓存同一线程的 inProgress turn；该行为与 Codex app-server 的单写入者约束冲突。
+- 物理手机/OEM锁屏、Doze、声音、真实移动网络及长时间后台运行未验证。
+- 全量读屏、200%字号、所有Windows缩放和所有平板断点未完成实机矩阵；当前运行截图只覆盖实际测过的尺寸。
+- Desktop管道是非公开接口；目标版本真实消息接收需明确授权验收会话，不能以只读验证代替。
+- 多工作站同task.id合并、多租户权限、完整对话回复流不是当前产品合同。
+- 最后一次stream拆分/交互背压改动未重跑30分钟，已有针对性回归；生产磁盘、反代和unit资源限额未压测。
+- 已部署服务器并发布联合清单；签名信任与真实覆盖安装仍独立于Debug构建，未完成安装器和Release APK的实机运行验收。
 
-当时的实现顺序是：当前工作站缓存 turn 为 inProgress 时只调用 `turn/steer`；无活动 turn 才调用 `thread/resume`，resume 后若返回活动 turn 则 steer，否则 start。每线程仍只串行短暂 RPC，不等待回合结束，也没有增加本地业务消息队列。`already has an active writer` 统一映射为脱敏归属提示，禁止重试、接管或新建 turn；服务端仍使用 requestId + threadId 关联回执，协议字段未变。
-
-Android 发送草稿不再以本地 WebSocket 写入成功为清空条件，仅在相同 requestId 收到工作站 `started` 回执后清空。工作站拒绝、归属冲突、断线和未知结果均保留草稿。Node 回归新增 direct-steer 和 active-writer 两个场景，最终为 12 文件 / 45 项通过；Android debug 单元测试、assembleDebug 和 lintDebug 通过。物理 Android 设备限制仍按用户确认保留。
-
-## 手机消息自有回合误报修复（2026-09-12）
-
-工作站刚通过官方 `turn/start` 创建的回合，在通知到达本地缓存前收到手机消息时，发送路径可能先调用 `thread/resume`，官方返回 `already has an active writer`，被错误显示为“另一 Codex 实例”。现改为遇到该错误立即读取同线程 `thread/turns/list`；若存在 `inProgress` 回合则直接 `turn/steer`，仅在权威读取仍无活动回合时保留真正的外部实例冲突提示。
-
-新增回归覆盖“缓存为空、resume 冲突、权威活动回合、steer 成功”路径；全量 Node 测试为 12 文件 / 46 项通过。协议字段、服务端 schema 和 Android 包无需变化。
-
-## 2026-09-12 active-writer 误判修复发布
-
-发布 Windows 2.0.14 和 Android 2.0.13（versionCode 16）。工作站遇到 `already has an active writer` 时先读取权威回合，但只有当前 app-server 已观察过同一 turn 才执行 `turn/steer`；否则保留真实外部实例冲突提示。全量 Node 回归 12 文件 / 46 项通过，协议 `codex-assistant.v3` 和 SQLite schema 6 未变化。
-
-Windows 安装包未签名；Android Release APK 使用仓库外 keystore，签名 v2 校验通过。两个文件上传前后均按 SHA-256 校验，联合清单原子更新；公网完整下载和健康检查通过后才完成发布。
-
-## 2026-09-12 active-writer 修复包公网验收
-
-Windows `2.0.14`：`111614927` 字节，SHA-256 `15c8f5a98ddbd78c29b1549a14e85bdfdc5f9e6aa39a382963f1d727c051812e`，未签名。Android `2.0.13/code 16`：`2171895` 字节，SHA-256 `96e65e7d474e3f03d00fdbf21618cd536d5ab8d4d0be058fddc35f192a1ecd6c`，release 签名 v2 有效。两个包均经 HTTPS 完整下载复核，清单哈希、字节数和 `immutable` 缓存头一致；生产 health 返回 `ok` / `codex-assistant.v3`。
-
-## 2026-09-11 客户端发布记录
-
-用户已授权发布、部署与本地提交。本次仅更新 Windows 与 Android 客户端；服务端协议仍为 `codex-assistant.v3`，SQLite schema 仍为 `6`，因此线上服务保留已验证的 `private-release-id` release。发布没有推送 Git 远程仓库。
-
-- Windows 2.0.13 已从本机已安装且版本匹配的 Electron 44.3.0 打包为 NSIS 安装包。该包为未签名状态（`NotSigned`），没有声称 Authenticode 信任。
-- Android 2.0.11（versionCode 14）已用仓库外 release keystore 构建；`apksigner verify --verbose` 通过，签名方案为 v2，单一签名者。
-- 两个版本化文件先上传到服务器临时目录并逐个比对 SHA-256；目标同名文件若存在不同字节会拒绝覆盖。验证后以原子 rename 替换 UTF-8 无 BOM 联合清单，旧清单备份到 `/var/backups/codex-assistant/20260911-mobile-writer-fix/download-manifest.json`。
-- 公网 HTTPS 验收：`/codex-assistant/health` 返回 `ok` 和 `codex-assistant.v3`；联合清单返回 `Cache-Control: no-store`，两个版本化安装包返回 `Cache-Control: public, max-age=31536000, immutable`。两个文件均完整下载后重新计算 SHA-256，与清单一致。
-
-| 平台 | 发布版本 | 字节数 | SHA-256 |
-|---|---|---:|---|
-| Windows | 2.0.13 | 111697889 | `79ec01ab0cf9537f7bae7865c2d6358f63a2c2b5c596d7780e1c6d12f58fe3bf` |
-| Android | 2.0.11 / code 14 | 2171843 | `f3ecedeaf9addb76524fee255fbf39880ca27a8cff8c97508709f679a79c40a2` |
-
-本地发布证据位于 `artifacts/production-2026-09-11/`，包括联合清单和平台构建输出；二进制包与签名材料不提交 Git。物理 Android 设备的锁屏、通知声音、厂商保活和覆盖安装限制仍按用户确认保留。
-
-## 2026-09-12 Android 网络恢复发布记录
-
-本次发布 Android 2.0.12（versionCode 15），修复后台返回前台和默认网络变化后的连接恢复。服务端代码、协议 `codex-assistant.v3`、SQLite schema 6 及 Windows 2.0.13 均未变化，因此未重启线上服务。
-
-- Release APK 用仓库外 keystore 构建，`apksigner verify --verbose` 通过，单一签名者且 APK Signature Scheme v2 有效。
-- 专用 API 36 模拟器完成 20 次前后台恢复、3 次断网恢复及服务端主动关闭恢复；具体时延和限制见 [网络恢复设计](android-network-recovery.zh-CN.md)。
-- APK 先上传临时路径并在服务器计算 SHA-256，确认后以版本化不可变文件发布；联合清单以原子 rename 更新，旧清单备份到 `/var/backups/codex-assistant/20260912-network-recovery/download-manifest.json`。
-- 公网 HTTPS 完整下载复核：Android 2.0.12 与 Windows 2.0.13 的字节数和 SHA-256 均匹配联合清单；manifest 返回 `Cache-Control: no-store`，版本化 APK 返回 `public, max-age=31536000, immutable`；`/codex-assistant/health` 返回 `ok` 和 `codex-assistant.v3`。
-
-| 平台 | 发布版本 | 字节数 | SHA-256 |
-|---|---|---:|---|
-| Windows | 2.0.13 | 111697889 | `79ec01ab0cf9537f7bae7865c2d6358f63a2c2b5c596d7780e1c6d12f58fe3bf` |
-| Android | 2.0.12 / code 15 | 2171891 | `fe038752012028ae0b32a278fa08bb4e7996b9c29d786869cc3dd5fcdbbc8d13` |
-
-本地发布证据位于 `artifacts/production-2026-09-12/`；二进制包、下载副本、签名材料和运行时诊断不提交 Git。无真机时，锁屏、Doze、移动网络、通知声音、厂商后台策略和覆盖安装仍是明确限制。
-
-## 2026-09-13 Desktop 持有会话的发送修复
-
-此前 2.0.14/2.0.13 的自有 app-server 回归没有解决用户现场问题：独立 app-server 即使读取到 turn，也没有 Desktop 会话的写入权。本次删除 resume/start/steer 发送路径，通过 Desktop 本机 app-tools 的 send_message_to_thread 投递到原 threadId。原实现测试不再作为 Desktop 会话可发送的证明，旧 official-steer 验收脚本删除。
-
-合同见 [Desktop 消息发送](desktop-message-routing.zh-CN.md)。started 是本次消息接受回执，立即释放服务端路由和手机发送等待；不再等待无从关联的回合完成通知，不自动重发未知结果。两端拒绝保留草稿，迟到回执不清空用户已编辑的新内容。删除 result 的 streaming/completed/text；协议仍为 codex-assistant.v3，schema=6，三端同步升级。
-
-| 验收项 | 结果与证据 |
-|---|---|
-| 真实 Desktop 活动会话 | 通过：当前运行会话实际收到 20260913-A 直接宿主标记，以及 CA_ANDROID_B / CA_ANDROID_C 手机标记，无写入者错误 |
-| Android → 中转 → Monitor → Desktop | 专用 API 36 模拟器、实际 Debug APK 与实际 Fastify 中转；连续两次接受耗时 882ms、84ms，输入清空且可继续发送。验收夹具的任务快照/回合摘要是合成数据，发送通道是真实宿主 |
-| Android 草稿与异常 | 合成拒绝保留正文；5秒延迟回执期间插入的新内容保留；该延迟场景不向真实会话写消息 |
-| Node 回归 | 13文件58项通过：真实命名管道分片/连续帧、并发连接、乱序响应、坏响应、帧上限、超时/断开不重发、多个宿主拒绝、发送串行与错误清理、服务器接受后断线不覆盖回执 |
-| Android 构建与测试 | 13项单元测试，0失败/0跳过；Debug构建/lint通过，lint为0错误17警告；Release R8及APK v2签名验证通过 |
-| Windows UI | Electron实际renderer/preload，8项通过；含主题、交互、托盘、接受回执、失败草稿和编辑草稿保留；无控制台错误 |
-| 包内代码检查 | Windows 2.0.15 asar包含新宿主；host/monitor与构建输出一致，renderer只存在无语义的CRLF/LF差异 |
-| Release APK启动 | 隔离模拟器安装2.0.14/code17，通知权限与首次连接页正常，崩溃日志为空；不能替代真机覆盖安装验收 |
-| 文档门 | 14份Markdown检查、字段/枚举对照通过；13页29交互57图重新渲染，静态验证0问题，人工检查预览和两端发送界面 |
-
-本地证据位于 artifacts/acceptance-2026-09-13/。保留限制：官方 Desktop 26.908.4834.0 的本机工具通道不是公开稳定 API；独立审批所有权未转移，Desktop自己的选项仍需在Desktop处理；无真机，厂商保活、硬件声音、移动网络与真机覆盖安装不宣称通过。
-
-服务端于2026-09-13部署 release `private-release-id`，现有schema6数据保留，服务及公网health通过。配置回滚备份在 `/var/backups/codex-assistant/private-release-id`。下载清单备份在 `/var/backups/codex-assistant/20260913-desktop-host`。
-
-| 安装包 | 字节数 | SHA-256 |
-|---|---:|---|
-| Windows 2.0.15（NotSigned） | 111699374 | `127c7ca85a376c511f49c4b44760642beaae9dc7363ee272ff7cf9acd08b4b55` |
-| Android 2.0.14/code17（release签名） | 2171891 | `cec9a8f4cf7e59688a0207f7c854cd16fe33ef1fd1cc0366f4c3d1e0b1aa53fc` |
-
-两个版本化安装包已完成服务器SHA-256核对并以原子清单发布。开发电脑已安装的Windows仍为2.0.14，本次没有替换该安装；需安装2.0.15才能使用新发送通道，仅更新手机无效。
-
-公网完整下载复核已通过：EXE/APK字节数与SHA-256均与联合清单一致；manifest为no-store，两个版本化二进制均为immutable。发布证据位于 artifacts/production-2026-09-13/。
+复现命令与隔离边界见[验收脚本](../scripts/acceptance/README.md)，发布要求见[发布说明](release.zh-CN.md)。

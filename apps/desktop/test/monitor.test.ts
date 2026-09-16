@@ -6,13 +6,13 @@ import type { IngestEvent, TaskSnapshot } from "@codex-assistant/protocol";
 import { Monitor, DESKTOP_HOST_UNAVAILABLE_MESSAGE, ACTIVE_EVIDENCE_MAX_AGE_MS, IN_PROGRESS_ITEM_MAX_AGE_MS } from "../src/monitor.js";
 import type { AppServerNotification } from "../src/app-server.js";
 
-const mock = vi.hoisted(() => ({ path: "", reads: 0, activeItem: true, revision: 0, notify: undefined as ((value: AppServerNotification) => void) | undefined }));
+const mock = vi.hoisted(() => ({ path: "", reads: 0, activeItem: true, revision: 0, threads: undefined as Array<{ id: string; updatedAt: string; status: { type: string } }> | undefined, notify: undefined as ((value: AppServerNotification) => void) | undefined }));
 vi.mock("../src/app-server.js", () => ({
   CodexAppServer: class {
     constructor(options: { onNotification: (value: AppServerNotification) => void }) { mock.notify = options.onNotification; }
     get ready() { return true; }
     async start() {} async stop() {} setTraceContext() {}
-    async listThreads() { return [{ id: "thread", path: mock.path, status: { type: "notLoaded" }, updatedAt: "2026-09-08T06:00:00Z" }]; }
+    async listThreads() { return mock.threads ?? [{ id: "thread", path: mock.path, status: { type: "notLoaded" }, updatedAt: "2026-09-08T06:00:00Z" }]; }
     async readThread() { mock.reads++; return {}; }
     async getGoal() { return undefined; }
     async listTurns() { return { data: [{ status: "interrupted" }] }; }
@@ -76,7 +76,7 @@ it("reprojects unchanged metadata, expires cached evidence on read failure, and 
   vi.spyOn(Date, "now").mockImplementation(() => now);
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
     if (url.endsWith("/events")) uploaded.push(JSON.parse(String(init.body)) as IngestEvent);
-    return { ok: true, status: 200 };
+    return { ok: true, status: 200, json: async () => ({ accepted: true, duplicate: false, sequence: Math.max(1, uploaded.length) }) };
   }));
   let monitor: Monitor | undefined;
   try {
@@ -132,7 +132,7 @@ it("waits for an in-flight upload before shutting down and persisting the queue"
   const upload = new Promise<void>(resolve => { release = resolve; });
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (url.endsWith("/events")) { entered(); await upload; }
-    return { ok: true, status: 200 };
+    return { ok: true, status: 200, json: async () => ({ accepted: true, duplicate: false, sequence: 1 }) };
   }));
   mock.path = join(directory, "absent.jsonl");
   const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://monitor.invalid", token: "test", deviceId: "test-device", onTasks() {} });
@@ -147,4 +147,35 @@ it("waits for an in-flight upload before shutting down and persisting the queue"
     expect(JSON.parse(await readFile(join(directory, "outbox.json"), "utf8")).events).toHaveLength(0);
     await expect(monitor.sendMessage("thread", "after stop")).rejects.toThrow("MONITOR_STOPPED");
   } finally { release(); await monitor.stop(); vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true }); }
+});
+
+
+it("uses the recorded upload span as the W3C HTTP parent within the poll trace", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-trace-chain-"));
+  mock.threads = [{ id: "trace-thread", updatedAt: "2026-09-08T06:00:00Z", status: { type: "idle" } }];
+  let event: IngestEvent | undefined;
+  let header = "";
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith("/events")) {
+      event = JSON.parse(String(init.body));
+      header = String((init.headers as Record<string,string>).traceparent);
+    }
+    return { ok: true, status: 200, json: async () => ({accepted:true,duplicate:false,sequence:1}) };
+  }));
+  let monitor: Monitor | undefined;
+  try {
+    monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://trace.invalid", token: "synthetic", deviceId: "trace-device", onTasks() {} });
+    await monitor.start();
+    await monitor.stop();
+    const spans = (await readFile(join(directory,"outbox.json.trace.jsonl"),"utf8")).trim().split("\n").map(line=>JSON.parse(line));
+    const poll = spans.find(span=>span.name==="desktop.poll");
+    const upload = spans.find(span=>span.name==="desktop.upload");
+    expect(event!.trace.traceId).toBe(poll.traceId);
+    expect(event!.trace.parentSpanId).toBe(poll.spanId);
+    expect(upload.parentSpanId).toBe(event!.trace.spanId);
+    expect(header).toBe(`00-${poll.traceId}-${upload.spanId}-01`);
+  } finally {
+    await monitor?.stop(); mock.threads=undefined; vi.unstubAllGlobals();
+    await rm(directory,{recursive:true,force:true});
+  }
 });

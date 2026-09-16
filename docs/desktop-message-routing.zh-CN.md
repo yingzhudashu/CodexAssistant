@@ -1,12 +1,12 @@
-# Desktop 会话消息发送合同（2026-09-13）
+# Desktop 会话消息发送合同
 
-本修订取代独立 app-server 的 resume/steer 发送方案。读取到其他进程的 turn 不代表取得写入权；此前仅验证自有 app-server 的测试不能证明 Desktop 会话可发送。
+本机读取和写入通道的所有权分别管理，读取到其他进程的回合不代表取得写入权。
 
 ## 数据流与责任
 
 Android → 已认证 WebSocket → 服务端唯一工作站控制器 → Monitor → Codex Desktop 本机 app-tools 管道 → 目标 threadId。Windows 本机发送从同一 Monitor 入口进入。独立 app-server 仅用于读取、状态采集及它自己收到的交互请求，不再创建、恢复或 steer 消息回合。运行中如何排队/steer 由 Desktop 处理，不创建应用业务队列或审批。
 
-本机证据为 Codex Desktop 26.908.4834.0 随附 codex-app-tools/server.mjs 及实测 tools/list。它是随 Desktop 分发的本机接口，非公开稳定 API；上线验收必须验证实际 Desktop 版本。官方文档网页本次返回 403，不能作为已核实来源。
+本机证据为 Codex Desktop 26.908.4834.0 随附 codex-app-tools/server.mjs 及实测 tools/list。它是随 Desktop 分发的本机接口，非公开稳定 API；上线验收必须验证实际 Desktop 版本。本轮未向真实会话发送测试消息；只读连接验证与合成回归不能代替实际消息接收验收。
 
 ## 本机协议
 
@@ -20,14 +20,14 @@ tools/call 参数为 namespace、tool、arguments、callId、threadId、turnId�
 
 ## 回执与界面
 
-线上仍为 codex-assistant.v3 / SQLite schema 6。result 字段固定 type、protocolVersion、requestId、threadId、status，可选 error；status 只有 started（Desktop 已接受）与 failed（未获得成功确认）。删除消息回执的 streaming/completed 与 text 字段。任务本身的 completed 和 latestTurn 不变，三端须同步升级，不提供兼容映射。
+当前协议为 codex-assistant.v3 / SQLite schema 6。result 字段固定 type、protocolVersion、requestId、threadId、status，可选 error；status 只有 started（Desktop 已接受）与 failed（未获得成功确认）。消息回执不含回复流、回合完成状态或正文。任务本身的 completed 和 latestTurn 不变，三端须同步升级，不提供兼容映射。
 
 started 是本次发送请求的终态，不能说明任务已开始或已完成。服务端收到回执立即释放路由；Android 清除本次 sending、清空本次未更改的草稿、恢复发送按钮，显示“Codex Desktop 已接受消息，可继续发送；进展请查看回合摘要”。Windows 相同。提交期间禁止重复点击；失败保留草稿；用户在提交期间编辑的新草稿不能被旧回执清除。页面退出和断线均不自动重发写入。
 
-Desktop 通道没有承诺返回实际 turnId 或回合事件流，因此不能用独立 app-server 的同线程通知关联本次消息，也不能以超时伪造回合失败。会话状态和回合摘要沿独立读取链路更新。Android 120 秒未获回执只结束本次等待并提示结果不确定。服务端断开仅使仍未确认的请求失败，不能覆盖已经 started 的回执。
+Desktop 通道没有承诺返回实际 turnId 或回合事件流，因此不能用独立 app-server 的同线程通知关联本次消息，也不能以超时伪造回合失败。会话状态和回合摘要沿独立读取链路更新。服务端 30 秒路由期限后返回未确认结果；Android 另设 120 秒本地兜底期限，仅结束等待并提示结果不确定。服务端断开仅使仍未确认的请求失败，不能覆盖已经 started 的回执。
 
 Windows workstation.status.ready 仍表示采集器 app-server 就绪，不代表 Desktop 发送通道可用；每次发送均检查通道，错误就地显示。Desktop 自己拥有的选项/审批仍需在 Desktop 回答，本次发送通道没有提供审批所有权转移能力。
 
 ## 验收门
 
-必须覆盖：真实 Desktop 活动会话的消息接收；连续发送；无宿主与多个宿主；工具拒绝；分片/多帧/无效帧；并发连接与关闭；丢回执后无自动重发；独立 app-server 通知不得生成虚假回执；started 后手机可再次发送且断线不覆盖成功；两端失败与编辑中草稿保留。没有安卓真机，厂商保活、硬件通知声音和真实移动网络切换保留限制。
+必须覆盖：真实 Desktop 活动会话的消息接收；连续发送；无宿主与多个宿主；工具拒绝；分片/多帧/无效帧；并发连接与关闭；丢回执后无自动重发；独立 app-server 通知不得生成虚假回执；started 后手机可再次发送且断线不覆盖成功；两端失败与编辑中草稿保留。本轮未操作物理手机；厂商保活、硬件通知声音和真实移动网络切换未验证。

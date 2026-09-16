@@ -33,3 +33,5 @@ artifacts/
 *.p12
 *.pfx
 android-release.properties
+
+*.trace.jsonl.1

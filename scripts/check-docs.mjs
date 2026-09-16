@@ -2,7 +2,13 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const files = [resolve(root, "README.md"), resolve(root, "deploy/README.md"), ...readdirSync(resolve(root, "docs"), { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".md")).map((entry) => resolve(root, "docs", entry.name))];
+// 递归覆盖设计源目录与验收说明，不遗漏嵌套 Markdown。
+function markdown(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry =>
+    entry.isDirectory() ? markdown(resolve(directory, entry.name)) :
+    entry.name.endsWith('.md') ? [resolve(directory, entry.name)] : []);
+}
+const files = [resolve(root, 'README.md'), ...markdown(resolve(root, 'docs')), ...markdown(resolve(root, 'deploy')), ...markdown(resolve(root, 'scripts/acceptance'))];
 const errors = [];
 for (const file of files) {
   const text = readFileSync(file, "utf8");
@@ -24,9 +30,15 @@ for (const version of [desktop.version, android]) {
   if (!version || !readme.includes(version) || !release.includes(version)) errors.push(`README/release docs do not describe client version ${version ?? "missing"}`);
 }
 if (!versionCode || !readme.includes(`Android versionCode **${versionCode}**`) || !release.includes(`versionCode=${versionCode}`)) errors.push("Android versionCode in README/release docs differs from source");
-// 下载链接必须精确匹配各端源码，不能因为正文里仍出现某个旧版本号就误通过。
-for (const [version, extension] of [[desktop.version, "exe"], [android, "apk"]]) {
-  if (!readme.includes(`/downloads/CodexAssistant-${version}.${extension})`)) errors.push(`README download link differs from ${version}.${extension}`);
+// 发布状态独立于源码版本；已发布时必须列出当前两端下载入口。
+const publicationStates = [readme, release].map(text => text.match(/发布状态：\*\*(待发布|已发布)\*\*/)?.[1]);
+if (publicationStates.some(state => !state) || publicationStates[0] !== publicationStates[1]) errors.push('README/release publication state is missing or inconsistent');
+if (publicationStates[0] === '已发布') {
+  for (const text of [readme, release]) {
+    for (const file of [`CodexAssistant-${desktop.version}.exe`, `CodexAssistant-${android}.apk`]) {
+      if (!text.includes(`https://server.example.com/codex-assistant/downloads/${file}`)) errors.push(`Published download is missing: ${file}`);
+    }
+  }
 }
 const protocol = readFileSync(resolve(root, "packages/protocol/src/index.ts"), "utf8").match(/PROTOCOL_VERSION\s*=\s*"([^"]+)"/)?.[1];
 const schema = readFileSync(resolve(root, "apps/server/src/database.ts"), "utf8").match(/SCHEMA_VERSION\s*=\s*(\d+)/)?.[1];
@@ -39,4 +51,4 @@ for (const file of files) {
   }
 }
 if (errors.length) { console.error(errors.join("\n")); process.exit(1); }
-console.log(`docs: ${files.length} Markdown files checked; local links, download versions, protocol and SQLite schema are valid`);
+console.log(`docs: ${files.length} Markdown files checked; local links, source versions, protocol and SQLite schema are valid`);

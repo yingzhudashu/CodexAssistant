@@ -1,5 +1,7 @@
 package site.codexassistant
 
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -7,25 +9,33 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 
-data class UpdateInfo(val version: String, val versionCode: Int, val windowsUrl: String, val androidUrl: String)
+data class UpdateInfo(
+    val version: String,
+    val versionCode: Int,
+    val windowsUrl: String,
+    val androidUrl: String,
+)
 
 /** 网络与解析全部在 IO 调度器执行；suspend 本身不会切换线程。连接池跨检查复用。 */
-class UpdateChecker(private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(8, TimeUnit.SECONDS).build()) {
-    suspend fun check(baseUrl: String): UpdateInfo = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url("$baseUrl/codex-assistant/downloads/manifest.json").build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("更新服务返回 HTTP ${response.code}")
-            // 清单只使用当前协议的固定字段，不猜测旧版本键名。
-            val body = response.body ?: throw IOException("更新清单为空")
-            val source = body.source()
-            source.request(65_537)
-            require(source.buffer.size <= 65_536) { "更新清单过大" }
-            parse(source.readUtf8())
+class UpdateChecker(
+    private val client: OkHttpClient =
+        OkHttpClient.Builder().callTimeout(8, TimeUnit.SECONDS).build()
+) {
+    suspend fun check(baseUrl: String): UpdateInfo =
+        withContext(Dispatchers.IO) {
+            val request =
+                Request.Builder().url("$baseUrl/codex-assistant/downloads/manifest.json").build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("更新服务返回 HTTP ${response.code}")
+                // 清单只使用当前协议的固定字段，不猜测旧版本键名。
+                val body = response.body ?: throw IOException("更新清单为空")
+                val source = body.source()
+                source.request(65_537)
+                require(source.buffer.size <= 65_536) { "更新清单过大" }
+                parse(source.readUtf8())
+            }
         }
-    }
 
     companion object {
         internal fun parse(payload: String): UpdateInfo {
@@ -36,9 +46,17 @@ class UpdateChecker(private val client: OkHttpClient = OkHttpClient.Builder().ca
                 val downloads = root.getValue("downloads").jsonObject
                 val android = downloads.getValue("android").jsonObject
                 fun url(platform: String): String {
-                    val value = downloads.getValue(platform).jsonObject.getValue("url").jsonPrimitive.content
+                    val value =
+                        downloads
+                            .getValue(platform)
+                            .jsonObject
+                            .getValue("url")
+                            .jsonPrimitive
+                            .content
                     val uri = java.net.URI(value)
-                    require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null)
+                    require(
+                        uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null
+                    )
                     return value
                 }
                 val version = android.getValue("versionName").jsonPrimitive.content

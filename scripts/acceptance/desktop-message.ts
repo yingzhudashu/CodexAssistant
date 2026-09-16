@@ -29,7 +29,7 @@ ws.on('open', () => send({ type: 'auth', protocolVersion: 'codex-assistant.v3', 
 ws.on('message', async raw => {
   const message = JSON.parse(String(raw));
   if (message.type === 'authenticated') {
-    send({ type: 'subscribe', protocolVersion: 'codex-assistant.v3', after: 0 }); send({ type: 'role', role: 'desktop' });
+    send({ type: 'subscribe', protocolVersion: 'codex-assistant.v3', after: 0 }); send({ type: 'role', protocolVersion: 'codex-assistant.v3', role: 'desktop' });
   }
   if (message.type === 'detail') send({ type: 'detail', protocolVersion: 'codex-assistant.v3', requestId: message.requestId, threadId, turns: [] });
   if (message.type !== 'send') return;
@@ -44,7 +44,7 @@ ws.on('message', async raw => {
   results.push({ requestId: message.requestId, status, elapsedMs: Math.round(performance.now() - start) });
   send({ type: 'result', protocolVersion: 'codex-assistant.v3', requestId: message.requestId, threadId, status, ...(error ? { error } : {}) });
   await mkdir('artifacts/acceptance-2026-09-13', { recursive: true });
-  await writeFile('artifacts/acceptance-2026-09-13/android-desktop-results.json', JSON.stringify(results, null, 2) + '\n');
+  await writeFile('artifacts/acceptance/android-desktop-results.json', JSON.stringify(results, null, 2) + '\n');
 });
 console.log('Loopback acceptance ready on 127.0.0.1:33241; real Desktop sends enabled');
 process.on('SIGINT', async () => { await monitor.stop(); ws.terminate(); await server.close(); await rm(directory, { recursive: true, force: true }); process.exit(); });

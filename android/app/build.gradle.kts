@@ -14,7 +14,7 @@ android {
     namespace = "site.codexassistant"
     compileSdk = 35
     defaultConfig {
-        applicationId = "site.codexassistant"; minSdk = 26; targetSdk = 35; versionCode = 17; versionName = "2.0.14"
+        applicationId = "site.codexassistant"; minSdk = 26; targetSdk = 35; versionCode = 18; versionName = "2.0.15"
     }
     signingConfigs {
         create("release") {
@@ -27,7 +27,7 @@ android {
         }
     }
     buildTypes {
-        getByName("debug") { buildConfigField("String", "CODEX_BASE_URL", "\"http://10.0.2.2:3240\""); manifestPlaceholders["usesCleartextTraffic"] = true }
+        getByName("debug") { buildConfigField("String", "CODEX_BASE_URL", "\"http://127.0.0.1:3240\""); manifestPlaceholders["usesCleartextTraffic"] = true }
         getByName("release") {
             isMinifyEnabled = true
             buildConfigField("String", "CODEX_BASE_URL", "\"https://server.example.com\"")

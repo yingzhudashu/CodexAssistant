@@ -5,9 +5,9 @@ const { tmpdir } = require('node:os');
 app.disableHardwareAcceleration();
 const directory = mkdtempSync(join(tmpdir(), 'codex-electron-acceptance-'));
 app.setPath('userData', directory);
-const artifact = resolve('artifacts/acceptance-2026-09-13');
+const artifact = resolve('artifacts/acceptance');
 mkdirSync(artifact, { recursive: true });
-const report = { preload: false, settings: false, interaction: false, dark: false, trayIcon: false, sendAccepted: false, failureDraft: false, editDraft: false, errors: [] };
+const report = { preload: false, settings: false, interaction: false, dark: false, trayIcon: false, sendAccepted: false, failureDraft: false, editDraft: false, stableDom: false, markdown: false, largeList: false, compact: false, errors: [] };
 app.whenReady().then(async () => {
   const tasks = [{ id: 'synthetic-thread', title: '验收示例任务', status: 'needs_action', freshness: 'fresh', runtimeStatus: 'idle', activeFlags: [], plan: [], updatedAt: new Date().toISOString(), changedAt: new Date().toISOString() }];
   let requests = [{ type: 'interaction.request', protocolVersion: 'codex-assistant.v3', requestId: 'synthetic-input', threadId: tasks[0].id, kind: 'single_select', title: '请选择执行计划', questions: [{ id: 'plan', header: '执行计划', question: '选择下一步操作', required: true, multiple: false, isOther: true, options: [{ id: 'a', label: '继续实现' }, { id: 'b', label: '调整计划' }] }] }];
@@ -20,6 +20,7 @@ app.whenReady().then(async () => {
   win.webContents.on('preload-error', (_event, _path, error) => report.errors.push(error.message));
   win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') report.errors.push(details.message); });
   const check = async (code) => { for (let i = 0; i < 80; i++) { if (await win.webContents.executeJavaScript(code)) return; await new Promise(r => setTimeout(r, 100)); } throw new Error('UI_TIMEOUT: ' + code); };
+  const painted = () => win.webContents.executeJavaScript("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
   try {
     await win.loadFile(resolve('apps/desktop/dist/renderer/index.html'));
     await check('document.body.innerText.includes("任务工作台")');
@@ -28,9 +29,11 @@ app.whenReady().then(async () => {
     await check('document.body.innerText.includes("颜色主题")'); report.settings = true;
     await win.webContents.executeJavaScript('document.querySelector("input[value=dark]").click()');
     await check('document.documentElement.dataset.theme === "dark"'); report.dark = true;
+    await painted();
     writeFileSync(join(artifact, 'windows-settings-dark.png'), (await win.webContents.capturePage()).toPNG());
     await win.webContents.executeJavaScript('document.querySelector("[data-page=tasks]").click(); document.querySelector("[data-task]").click()');
     await check('document.querySelector("[data-interaction]") !== null');
+    await painted();
     writeFileSync(join(artifact, 'windows-interaction.png'), (await win.webContents.capturePage()).toPNG());
     await win.webContents.executeJavaScript('document.querySelector("[data-option=\\"0\\"]").click(); document.querySelector("[data-interaction]").requestSubmit()');
     await check('document.querySelector("[data-interaction]") === null');
@@ -43,10 +46,33 @@ app.whenReady().then(async () => {
     await check("document.body.innerText.includes('验收拒绝') && document.querySelector('#message').value === 'reject-test'"); report.failureDraft=true;
     await draft('slow-test'); await submit(); await draft('new-draft');
     await check("document.body.innerText.includes('Codex Desktop 已接受消息') && document.querySelector('#message').value === 'new-draft' && !document.querySelector('#send').disabled"); report.editDraft=true;
-    await new Promise(resolve => setTimeout(resolve, 200));
+    await win.webContents.executeJavaScript("window.acceptanceInput=document.querySelector('#message');window.acceptanceCard=document.querySelector('[data-task]');document.querySelector('#message').focus()");
+    win.webContents.send('tasks.updated', tasks);
+    win.webContents.send('sync.status', 'syncing');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    win.webContents.send('sync.status', 'connected');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    report.domDiagnostics = await win.webContents.executeJavaScript("({input:window.acceptanceInput===document.querySelector('#message'),card:window.acceptanceCard===document.querySelector('[data-task]'),focus:document.activeElement?.id})");
+    report.stableDom = await win.webContents.executeJavaScript("window.acceptanceInput===document.querySelector('#message') && window.acceptanceCard===document.querySelector('[data-task]') && document.activeElement===window.acceptanceInput");
+    const markdownFixture = '```js\nconst x = "<script>";\n```\n\n**结束**\n\n|列|值|\n|---|---|\n|一|二|\n\n<script>alert(1)</script>';
+    report.markdown = await win.webContents.executeJavaScript(`(()=>{const el=document.createElement('div');el.innerHTML=window.renderRichText(${JSON.stringify(markdownFixture)});return el.querySelectorAll('pre').length===1 && el.querySelectorAll('pre code').length===1 && !!el.querySelector('strong') && !el.querySelector('pre strong') && !!el.querySelector('table') && !el.querySelector('script')})()`);
+    const many = Array.from({ length: 1000 }, (_, i) => ({ ...tasks[0], id: `large-${i}`, title: `大列表任务 ${i}` }));
+    const listStart = performance.now();
+    win.webContents.send('tasks.updated', many);
+    await check("document.querySelectorAll('[data-task]').length === 1000");
+    report.largeListMs = performance.now() - listStart; report.largeList = true;
+    win.setSize(430, 600);
+    await win.webContents.executeJavaScript("document.querySelector('[data-task]').click()");
+    await check("document.querySelector('[data-tab=message]') !== null");
+    await win.webContents.executeJavaScript("document.querySelector('[data-tab=message]').click()");
+    report.compact = await win.webContents.executeJavaScript("document.documentElement.scrollWidth <= window.innerWidth && !!document.querySelector('#message')");
+    await painted();
+    writeFileSync(join(artifact,'windows-compact.png'),(await win.webContents.capturePage()).toPNG());
+    await win.webContents.executeJavaScript("document.querySelector('#send').scrollIntoView({block:'nearest'})");
+    await painted();
     writeFileSync(join(artifact,'windows-message.png'),(await win.webContents.capturePage()).toPNG());
     report.trayIcon = !nativeImage.createFromPath(resolve('apps/desktop/dist/assets/tray.ico')).isEmpty();
   } catch (error) { report.errors.push(error.message); }
-  finally { writeFileSync(join(artifact, 'electron-smoke.json'), JSON.stringify(report, null, 2)); win.destroy(); if(report.errors.length) process.exitCode=1; app.quit(); }
+  finally { for(const [key,value] of Object.entries(report)) if(value===false) report.errors.push(`FAILED:${key}`); writeFileSync(join(artifact, 'electron-smoke.json'), JSON.stringify(report, null, 2)); win.destroy(); app.exit(report.errors.length ? 1 : 0); }
 });
 app.on('will-quit', () => { try { rmSync(directory, { recursive: true, force: true }); } catch {} });

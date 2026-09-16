@@ -2,7 +2,7 @@
 import os, pathlib, re, subprocess, sys, xml.etree.ElementTree as ET
 
 ADB = str(pathlib.Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/platform-tools/adb.exe')
-ARTIFACT = pathlib.Path(__file__).resolve().parents[2] / 'artifacts/acceptance-2026-09-10'
+ARTIFACT = pathlib.Path(__file__).resolve().parents[2] / 'artifacts/acceptance'
 def adb(*args):
     return subprocess.check_output([ADB, '-s', 'emulator-5580', *args], timeout=25)
 def tree():

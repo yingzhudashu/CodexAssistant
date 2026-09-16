@@ -2,7 +2,6 @@
 import json, os, pathlib, subprocess, sys, time, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'artifacts/acceptance-2026-09-10/python-libs'))
 import uiautomator2 as u2
 
 ADB = str(pathlib.Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/platform-tools/adb.exe')
@@ -34,7 +33,7 @@ try:
     for i in range(20):
         d.press('home');time.sleep(.5)
         before=metrics();start=time.monotonic();foreground()
-        until(lambda:metrics()['active']==1 and d.app_current()['package']=='site.codexassistant')
+        until(lambda:metrics()['active']==1 and metrics()['snapshots']>before['snapshots'] and d.app_current()['package']=='site.codexassistant')
         ms=round((time.monotonic()-start)*1000)
         assert ms<=5000,(i,ms)
         assert d.app_current()['package'] == 'site.codexassistant'
@@ -46,10 +45,12 @@ try:
         adb('shell','svc','wifi','disable');adb('shell','svc','data','disable')
         until(lambda:metrics()['active']==0,10)
         count=metrics()['snapshots'];start=time.monotonic()
-        adb('shell','svc','wifi','enable')
+        # 恢复原先可用的接口；AVD未连接Wi-Fi时不能仅开Wi-Fi冒充网络恢复。
+        if wifi!='0': adb('shell','svc','wifi','enable')
+        if data!='0': adb('shell','svc','data','enable')
         until(lambda:metrics()['snapshots']>count and metrics()['active']==1,10)
         ms=round((time.monotonic()-start)*1000)
-        report['network'].append({'iteration':i+1,'msIncludingWifiAssociation':ms})
+        report['network'].append({'iteration':i+1,'msIncludingNetworkRestore':ms})
         foreground();assert d.app_current()['package'] == 'site.codexassistant'
         print('network',i+1,ms,flush=True)
     count=metrics()['snapshots']

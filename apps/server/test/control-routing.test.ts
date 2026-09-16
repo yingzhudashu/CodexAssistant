@@ -43,6 +43,26 @@ it('finishes a send at acceptance and does not overwrite it when the workstation
   expect(phone.messages.filter(m => m.type === 'result').map(m => m.status)).toEqual(['started']);
 });
 
+it('expires unanswered control requests without replaying a write or closing the phone', async () => {
+  const f = await fixture(); const desktop = await f.connect(true); const phone = await f.connect();
+  phone.send({ type: 'send', requestId: 'timeout-message', threadId: 'thread', text: 'synthetic' });
+  await vi.waitFor(() => expect(desktop.messages.some(m => m.requestId === 'timeout-message')).toBe(true));
+  const future = Date.now() + 31_000;
+  const now = vi.spyOn(Date, 'now').mockReturnValue(future);
+  try { await vi.waitFor(() => expect(phone.messages.some(m => m.requestId === 'timeout-message' && m.status === 'failed')).toBe(true), { timeout: 2000 }); }
+  finally { now.mockRestore(); }
+  expect(phone.socket.readyState).toBe(WebSocket.OPEN);
+  expect(desktop.messages.filter(m => m.requestId === 'timeout-message')).toHaveLength(1);
+});
+
+it('bounds pending control requests and gives an actionable overload result', async () => {
+  const f = await fixture(); const desktop = await f.connect(true); const phone = await f.connect();
+  for (let i = 0; i < 257; i++) phone.send({ type: 'detail', requestId: `bounded-${i}`, threadId: 'thread' });
+  await vi.waitFor(() => expect(phone.messages.some(m => m.requestId === 'bounded-256' && m.status === 'failed')).toBe(true));
+  expect(desktop.messages.filter(m => m.type === 'detail')).toHaveLength(256);
+  expect(phone.socket.readyState).toBe(WebSocket.OPEN);
+});
+
 it('rejects a cross-thread result instead of delivering it to another conversation', async () => {
   const f = await fixture(); const desktop = await f.connect(true); const phone = await f.connect();
   phone.send({ type: 'send', requestId: 'message-1', threadId: 'thread-1', text: 'continue' });
@@ -118,4 +138,18 @@ it('closes a backpressured subscriber and restores the latest task on reconnect'
   const restored = await f.connect();
   expect(restored.messages.find(m => m.type === 'snapshot')?.tasks).toContainEqual(expect.objectContaining({ id: 'slow-thread', status: 'running' }));
   expect(restored.messages.some(m => m.type === 'event' && m.event.sequence === 1)).toBe(true);
+});
+
+
+it('replays a large pending-form set after the snapshot without disconnecting a healthy reader', async () => {
+  const f = await fixture(); const desktop = await f.connect(true);
+  // 300个独立表单的总字节超过256KiB，不能一次排队后把健康重连误判为慢消费者。
+  for (let i=0;i<300;i++) desktop.send({ type:'interaction.request',requestId:`large-form-${i}`,threadId:'thread',kind:'text',title:'Synthetic form',description:'x'.repeat(500),questions:[{id:'answer',header:'Answer',question:'y'.repeat(500),required:true,multiple:false,isOther:false,isSecret:false}] });
+  // pong与前面的帧在同一TCP流中有序处理，作为表单已接收的屏障。
+  const pong = new Promise<void>(resolve => desktop.socket.once('pong', () => resolve()));
+  desktop.socket.ping(); await pong;
+  const probe = await f.connect();
+  await vi.waitFor(()=>expect(probe.messages.filter(m=>m.type==='interaction.request')).toHaveLength(300),{timeout:5000});
+  expect(probe.socket.readyState).toBe(WebSocket.OPEN);
+  expect(probe.messages.findIndex(m=>m.type==='snapshot')).toBeLessThan(probe.messages.findIndex(m=>m.type==='interaction.request'));
 });

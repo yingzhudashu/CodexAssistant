@@ -3,13 +3,26 @@ import { Value } from "typebox/value";
 
 export const PROTOCOL_VERSION = "codex-assistant.v3" as const;
 
-const Strict = <const T extends Parameters<typeof Type.Object>[0]>(properties: T) =>
-  Type.Object(properties, { additionalProperties: false });
+const Strict = <const T extends Parameters<typeof Type.Object>[0]>(
+  properties: T,
+) => Type.Object(properties, { additionalProperties: false });
 const IsoTimestamp = Type.String({ minLength: 20, maxLength: 40 });
-const Identifier = Type.String({ minLength: 1, maxLength: 200, pattern: "^[A-Za-z0-9._:-]+$" });
+const Identifier = Type.String({
+  minLength: 1,
+  maxLength: 200,
+  pattern: "^[A-Za-z0-9._:-]+$",
+});
 const SafeText = Type.String({ minLength: 1, maxLength: 500 });
-const TraceId = Type.String({ minLength: 32, maxLength: 32, pattern: "^[a-f0-9]{32}$" });
-const SpanId = Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" });
+const TraceId = Type.String({
+  minLength: 32,
+  maxLength: 32,
+  pattern: "^[a-f0-9]{32}$",
+});
+const SpanId = Type.String({
+  minLength: 16,
+  maxLength: 16,
+  pattern: "^[a-f0-9]{16}$",
+});
 
 /**
  * 跨桌面端、服务端和 Android 的最小追踪上下文。
@@ -29,9 +42,70 @@ export const TraceSpanSchema = Strict({
   name: Type.String({ minLength: 1, maxLength: 80 }),
   startedAt: IsoTimestamp,
   endedAt: IsoTimestamp,
-  attributes: Type.Optional(Type.Record(Type.String({ maxLength: 40 }), Type.String({ maxLength: 200 }), { maxProperties: 20 })),
+  attributes: Type.Optional(
+    Type.Record(
+      Type.String({ maxLength: 40 }),
+      Type.String({ maxLength: 200 }),
+      { maxProperties: 20 },
+    ),
+  ),
 });
 export type TraceSpan = Static<typeof TraceSpanSchema>;
+
+/** 诊断属性只接受语义明确的计数、标识和枚举，不能借错误文本带出路径或凭据。 */
+export function safeTraceSpan(span: TraceSpan): TraceSpan {
+  const attributes: Record<string, string> = {};
+  const numeric = new Set([
+    "status",
+    "count",
+    "latencyMs",
+    "threads",
+    "tasks",
+    "outbox",
+    "replayCount",
+  ]);
+  for (const [key, value] of Object.entries(span.attributes ?? {})) {
+    if (numeric.has(key) && /^\d+(?:\.\d+)?$/.test(value))
+      attributes[key] = value;
+    else if (key === "duplicate" && /^(true|false)$/.test(value))
+      attributes[key] = value;
+    else if (key === "taskId" && /^[A-Za-z0-9._:-]{1,200}$/.test(value))
+      attributes[key] = value;
+    else if (
+      key === "route" &&
+      /^\/codex-assistant\/(?:health|api\/v3\/(?:events|tasks|stream|traces\/spans|traces\/:traceId))$/.test(
+        value,
+      )
+    )
+      attributes[key] = value;
+    else if (
+      key === "phase" &&
+      /^(open|connect|authenticate|subscribe|decode|reduce|close)$/.test(value)
+    )
+      attributes[key] = value;
+    else if (key === "source" && value === "app_server")
+      attributes[key] = value;
+    else if (key === "error")
+      attributes[key] = /^[A-Z][A-Z_]{1,79}$/.test(value)
+        ? value
+        : "OPERATION_FAILED";
+  }
+  const name =
+    /^(?:http\.(?:get|post|head|options|put|delete|patch)|server\.ingest|websocket\.(?:auth|subscribe)|desktop\.(?:poll|event|upload)(?:\.error)?|app_server\.(?:diagnostic|initialize|thread_[a-z_]+)|android\.(?:sync|lifecycle|service|refresh)\.[a-z_]+)$/.test(
+      span.name,
+    )
+      ? span.name
+      : "diagnostic";
+  return {
+    traceId: span.traceId,
+    spanId: span.spanId,
+    ...(span.parentSpanId ? { parentSpanId: span.parentSpanId } : {}),
+    name,
+    startedAt: span.startedAt,
+    endedAt: span.endedAt,
+    ...(Object.keys(attributes).length ? { attributes } : {}),
+  };
+}
 
 export const TaskStatusSchema = Type.Union([
   Type.Literal("running"),
@@ -71,7 +145,11 @@ export const FreshnessSchema = Type.Union([
 export type Freshness = Static<typeof FreshnessSchema>;
 
 export const TaskErrorSchema = Strict({
-  code: Type.String({ minLength: 1, maxLength: 80, pattern: "^[A-Za-z0-9._:-]+$" }),
+  code: Type.String({
+    minLength: 1,
+    maxLength: 80,
+    pattern: "^[A-Za-z0-9._:-]+$",
+  }),
   message: SafeText,
 });
 export type TaskError = Static<typeof TaskErrorSchema>;
@@ -212,20 +290,40 @@ export const ClientSubscribeMessageSchema = Strict({
   protocolVersion: Type.Literal(PROTOCOL_VERSION),
   after: Type.Integer({ minimum: 0 }),
 });
-export type ClientSubscribeMessage = Static<typeof ClientSubscribeMessageSchema>;
+export type ClientSubscribeMessage = Static<
+  typeof ClientSubscribeMessageSchema
+>;
 
 export const ClientDetailMessageSchema = Strict({
-  type: Type.Literal("detail"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier,
-  cursor: Type.Optional(Type.String({ maxLength: 500 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  type: Type.Literal("detail"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+  requestId: Identifier,
+  threadId: Identifier,
+  cursor: Type.Optional(Type.String({ maxLength: 500 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
 });
 export type ClientDetailMessage = Static<typeof ClientDetailMessageSchema>;
 export const ClientSendMessageSchema = Strict({
-  type: Type.Literal("send"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier,
-  threadId: Identifier, text: Type.String({ minLength: 1, maxLength: 20_000 }),
+  type: Type.Literal("send"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+  requestId: Identifier,
+  threadId: Identifier,
+  text: Type.String({ minLength: 1, maxLength: 20_000 }),
 });
 export type ClientSendMessage = Static<typeof ClientSendMessageSchema>;
-export const InteractionOptionSchema = Strict({ id: Identifier, label: SafeText, description: Type.Optional(SafeText) });
-export const InteractionKindSchema = Type.Union([Type.Literal("single_select"), Type.Literal("multi_select"), Type.Literal("confirm"), Type.Literal("text"), Type.Literal("plan_select"), Type.Literal("unsupported")]);
+export const InteractionOptionSchema = Strict({
+  id: Identifier,
+  label: SafeText,
+  description: Type.Optional(SafeText),
+});
+export const InteractionKindSchema = Type.Union([
+  Type.Literal("single_select"),
+  Type.Literal("multi_select"),
+  Type.Literal("confirm"),
+  Type.Literal("text"),
+  Type.Literal("plan_select"),
+  Type.Literal("unsupported"),
+]);
 export const InteractionQuestionSchema = Strict({
   id: Type.String({ minLength: 1, maxLength: 200 }),
   header: SafeText,
@@ -234,34 +332,82 @@ export const InteractionQuestionSchema = Strict({
   multiple: Type.Boolean(),
   isSecret: Type.Optional(Type.Boolean()),
   isOther: Type.Optional(Type.Boolean()),
-  options: Type.Optional(Type.Array(InteractionOptionSchema, { maxItems: 100 })),
+  options: Type.Optional(
+    Type.Array(InteractionOptionSchema, { maxItems: 100 }),
+  ),
 });
 export type InteractionQuestion = Static<typeof InteractionQuestionSchema>;
 export const InteractionRequestSchema = Strict({
-  type: Type.Literal("interaction.request"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier,
-  kind: InteractionKindSchema, title: SafeText, description: Type.Optional(SafeText), options: Type.Optional(Type.Array(InteractionOptionSchema, { maxItems: 100 })),
-  questions: Type.Optional(Type.Array(InteractionQuestionSchema, { maxItems: 100 })),
+  type: Type.Literal("interaction.request"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+  requestId: Identifier,
+  threadId: Identifier,
+  kind: InteractionKindSchema,
+  title: SafeText,
+  description: Type.Optional(SafeText),
+  options: Type.Optional(
+    Type.Array(InteractionOptionSchema, { maxItems: 100 }),
+  ),
+  questions: Type.Optional(
+    Type.Array(InteractionQuestionSchema, { maxItems: 100 }),
+  ),
   expiresAt: Type.Optional(IsoTimestamp),
 });
 export type InteractionRequest = Static<typeof InteractionRequestSchema>;
-export const InteractionSubmitMessageSchema = Strict({ type: Type.Literal("interaction.submit"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier, value: Type.Unknown() });
-export type InteractionSubmitMessage = Static<typeof InteractionSubmitMessageSchema>;
-export const InteractionResultSchema = Strict({ type: Type.Literal("interaction.result"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier, status: Type.Union([Type.Literal("submitted"), Type.Literal("cancelled"), Type.Literal("expired"), Type.Literal("failed")]), value: Type.Optional(Type.Unknown()), error: Type.Optional(Type.String({ maxLength: 500 })) });
+export const InteractionSubmitMessageSchema = Strict({
+  type: Type.Literal("interaction.submit"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+  requestId: Identifier,
+  threadId: Identifier,
+  value: Type.Unknown(),
+});
+export type InteractionSubmitMessage = Static<
+  typeof InteractionSubmitMessageSchema
+>;
+export const InteractionResultSchema = Strict({
+  type: Type.Literal("interaction.result"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+  requestId: Identifier,
+  threadId: Identifier,
+  status: Type.Union([
+    Type.Literal("submitted"),
+    Type.Literal("cancelled"),
+    Type.Literal("expired"),
+    Type.Literal("failed"),
+  ]),
+  value: Type.Optional(Type.Unknown()),
+  error: Type.Optional(Type.String({ maxLength: 500 })),
+});
 export type InteractionResult = Static<typeof InteractionResultSchema>;
 export const DetailMessageSchema = Strict({
-  type: Type.Literal("detail"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier, threadId: Identifier,
-  turns: Type.Array(Type.Unknown(), { maxItems: 50 }), cursor: Type.Optional(Type.String({ maxLength: 500 })),
+  type: Type.Literal("detail"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+  requestId: Identifier,
+  threadId: Identifier,
+  turns: Type.Array(Type.Unknown(), { maxItems: 50 }),
+  cursor: Type.Optional(Type.String({ maxLength: 500 })),
 });
 export type DetailMessage = Static<typeof DetailMessageSchema>;
 export const ResultMessageSchema = Strict({
-  type: Type.Literal("result"), protocolVersion: Type.Literal(PROTOCOL_VERSION), requestId: Identifier,
-  threadId: Identifier, status: Type.Union([Type.Literal("started"), Type.Literal("failed")]),
+  type: Type.Literal("result"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+  requestId: Identifier,
+  threadId: Identifier,
+  status: Type.Union([Type.Literal("started"), Type.Literal("failed")]),
   error: Type.Optional(Type.String({ maxLength: 500 })),
 });
 export type ResultMessage = Static<typeof ResultMessageSchema>;
 
-export const ClientWebSocketMessageSchema = Type.Union([ClientAuthMessageSchema, ClientSubscribeMessageSchema, ClientDetailMessageSchema, ClientSendMessageSchema, InteractionSubmitMessageSchema]);
-export type ClientWebSocketMessage = Static<typeof ClientWebSocketMessageSchema>;
+export const ClientWebSocketMessageSchema = Type.Union([
+  ClientAuthMessageSchema,
+  ClientSubscribeMessageSchema,
+  ClientDetailMessageSchema,
+  ClientSendMessageSchema,
+  InteractionSubmitMessageSchema,
+]);
+export type ClientWebSocketMessage = Static<
+  typeof ClientWebSocketMessageSchema
+>;
 
 export const AuthenticatedMessageSchema = Strict({
   type: Type.Literal("authenticated"),
@@ -301,7 +447,9 @@ export const ServerWebSocketMessageSchema = Type.Union([
   InteractionRequestSchema,
   InteractionResultSchema,
 ]);
-export type ServerWebSocketMessage = Static<typeof ServerWebSocketMessageSchema>;
+export type ServerWebSocketMessage = Static<
+  typeof ServerWebSocketMessageSchema
+>;
 
 export function parseStrict<T>(schema: TSchema, value: unknown): T | undefined {
   return Value.Check(schema, value) ? (value as T) : undefined;

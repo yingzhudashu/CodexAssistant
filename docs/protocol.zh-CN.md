@@ -1,6 +1,6 @@
 # 协议说明
 
-本轮为不兼容升级，协议版本固定为 `codex-assistant.v3`。桌面端、服务端和 Android 必须使用同一协议版本，旧版本直接拒绝。
+当前协议版本固定为 `codex-assistant.v3`。桌面端、服务端和 Android 必须使用同一协议版本，旧版本直接拒绝。
 
 ## 事件
 
@@ -45,7 +45,7 @@ Android 序列化启用 `encodeDefaults=true` 和 `explicitNulls=false`：auth/s
 
 ## 时间语义
 
-协议中的时间统一以 UTC ISO-8601 传输。Android 和 Windows 在显示时才转换到设备时区，包含年月日、时分秒和 UTC 偏移量；不得去掉 Z 后直接当作本地时间，也不固定加八小时。
+协议中的时间统一以 UTC ISO-8601 传输。Android 和 Windows 在显示时才转换到设备时区，包含本地日期和时间；Android 格式包含偏移量，Windows 使用系统本地化短日期/完整时间；不得去掉 Z 后直接当作本地时间，也不固定加八小时。
 
 `updatedAt` 是任务源数据的最近更新时间，不是扫描时间。对于由本机回合生命周期确定的展示状态，`changedAt` 是最近开始、完成或中止事件的时间，不随后续元数据更新而漂移；Goal 优先时保留归一化快照的 changedAt（当前来自线程元数据），它不是独立观测的 Goal 状态变更时间。缓存读取失败不把来源时间更新成现在。Windows 底部“最后采集”表示本次采集时间，不能代替任务发生时间。
 
@@ -61,14 +61,14 @@ Windows 连接状态为 connecting/syncing/connected/offline，与 Android 状�
 
 HTTP body 上限 128 KiB，WebSocket 的 128 KiB 限制作用于客户端入站消息，服务端任务快照没有按该大小分块。慢订阅者缓冲达到 256 KiB 时以 1013 关闭连接，客户端自动重连并按游标重放和接收最新快照，不能静默跳过广播。这些边界需纳入后续稳定性验收。
 
-## 2026-09-10 客户端表示合同
+## 客户端表示合同
 
 任务筛选顺序与标签固定为：running/进行中、completed/已完成、failed/失败、needs_action/待确认。旧状态值删除，不提供兼容映射、migration 或 fallback。
 
 Windows 新增仅本机 IPC `workstation.status -> { ready: boolean }`，不携带 Token 或正文。ready 来源于本机 app-server 的初始化完成状态；它与云端同步、任务业务状态相互独立。该 IPC 不新增公网 API。
 
 
-## Codex 交互请求合同（验收修订）
+## Codex 交互请求合同
 
 以本机 codex-cli 0.153.4 `app-server generate-json-schema --experimental` 为官方协议证据。Windows 拥有自己启动的 app-server 请求；不能假设独立 app-server 可以应答另一个 Codex 桌面进程拥有的审批。Android 通过中转提交，Windows 本机使用同一交互处理入口。
 
@@ -88,6 +88,12 @@ commandExecution/fileChange/requestApproval 显示命令、目录、原因或修
 
 筛选顺序为全部、进行中、已完成、失败、待确认。待处理交互优先于运行态；明确失败、官方当前活动、明确完成和证据过期按状态规则投影。运行证据不足归 needs_action；官方 Goal 的 active/paused/blocked 等属于输入域，转换成四种展示状态不是保留旧客户端协议。
 
-## 发布边界
+## 版本与资源边界
 
-本轮唯一协议为 codex-assistant.v3，唯一 API 前缀为 /codex-assistant/api/v3；SQLite schema=6。v2 客户端和 schema=5 数据库直接拒绝；不提供旧入口、兼容字段或 migration。2026-09-10 已部署生产 v3，客户端发布 Windows 2.0.12、Android 2.0.10（versionCode 13）；旧客户端必须更新。
+唯一 API 前缀 /codex-assistant/api/v3，SQLite schema=6。客户端源码版本及发布状态见[发布说明](release.zh-CN.md)，本文不保存旧发布历史。
+
+工作站在完成订阅后发送严格身份消息：`{"type":"role","protocolVersion":"codex-assistant.v3","role":"desktop"}`。额外字段、错误版本或第二个在线控制器均拒绝。所有连接须在 15 秒内完成认证和订阅。
+
+控制请求全局最多 256 条，30 秒无响应即释放并返回关联 failed，说明结果未确认；此时不得重发普通消息。待答交互最多 1000，终态缓存最多 1000。初始事件回放最多 500 条，达到 256 KiB 发送缓冲时提前结束回放，由完整 snapshot 校准；不能将回放当完整审计日志。
+
+Trace 查询 limit 只接受 1–1000 的整数。上传同时校验时间先后与安全属性；实现见[Trace](trace.zh-CN.md)。health 包含累计 cpuUsageMicros 和 traceFailedExports；累计 CPU 需对两次采样做差，不能直接当瞬时占用率。

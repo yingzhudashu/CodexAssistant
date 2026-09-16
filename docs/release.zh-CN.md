@@ -1,55 +1,54 @@
-# 安装包与发布
+# 构建与发布
 
-当前源码 Windows 版本为 `2.0.15`，Android 为 `2.0.14`；Android `versionCode=17`，协议固定为 `codex-assistant.v3`，schema=6。本次通过 Codex Desktop 宿主发送消息，删除独立 app-server 的写入路径，发送回执仅有 started/failed，收到 started 立即允许下一条消息。三端同步升级，旧 streaming/completed 消息回执与 text 字段删除。详情见 [发送合同](desktop-message-routing.zh-CN.md)。
+发布状态：**已发布**。当前 Windows `2.0.16`，Android `2.0.15`（`versionCode=18`），协议 `codex-assistant.v3`，SQLite schema=6。2026-09-16 已部署至 `deployment-host`，生产 release 为 `private-release-id`，并原子更新公网联合清单。
 
-## 构建
+当前下载：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)、[Android 2.0.15](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.15.apk)。两端已完整下载校验SHA-256；清单缓存为no-store，安装包缓存为immutable。产物大小、哈希和实际运行测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
+
+## 质量门
 
 ```powershell
+npm ci
 npm run build
 npm test
+npm run check:format
+npm run check:docs
+npm run check:design
+python docs/frontend-design/validate.py
+npm run test:ui
+npm run perf:server
+```
+
+Android 在 android 目录执行 `.\gradlew.bat checkKotlinFormat :app:testDebugUnitTest :app:assembleDebug :app:lintDebug`。记录实际通过数、警告和测试边界；不得以构建成功替代真机或消息发送验收。
+
+## 安装包
+
+```powershell
 .\scripts\build-windows-production.ps1
 .\scripts\build-android-production.ps1 -SigningProperties C:\secure\codexassistant\android-release.properties
 ```
 
-Windows 脚本构建 Electron 与 NSIS、计算 SHA-256 并复制到 `artifacts/windows`。当前配置禁用 Authenticode 签名，清单必须如实标记 `NotSigned`；不能声称包具有受信任的发布者签名。NSIS 使用项目图标，Electron 可执行文件资源编辑目前禁用。
+Windows 构建复用项目安装的同版本 Electron，打包 NSIS 至 artifacts/windows，记录体积、SHA-256、signatureStatus。当前配置明确未签名（NotSigned），不能声称可信发布者；不自动安装到本机。构建先清理 dist，避免旧产物递归装入安装包。
 
-发布脚本固定复用项目已安装的同版本 Electron，手动复现方式：先运行 `npm run build`，再在 `apps/desktop` 中执行 `..\..\node_modules\.bin\electron-builder.cmd --win nsis --publish never --config.electronDist=../../node_modules/electron/dist`。执行前核对 `node_modules/electron/dist/version` 与桌面 package.json 中的 Electron 依赖版本一致；不能使用不明来源或不同版本的运行时。
+Android Release 使用仓库外 keystore、R8 和 apksigner 校验，输出 artifacts/android。缺签名材料直接失败，不创建替代签名、不冒充 release。Debug APK 用调试签名；若与已安装包签名不同，不能覆盖安装。仅专用模拟器可以重置合成测试应用。
 
-Android 脚本执行 `assembleRelease`、启用 R8，使用仓库外 keystore 签名，随后执行 apksigner 验证并计算 SHA-256；产物位于 `artifacts/android`。缺少签名配置直接失败。必须保留同一 keystore 才能覆盖安装，密码不得写进日志或仓库。
+## 联合下载清单
 
-Android 回归命令：在 `android` 目录运行 `.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:lintDebug --no-daemon`。构建通过不等于真实设备后台验收通过。
+服务器目录 `/srv/www/codex-assistant/downloads`。版本化文件不可变，不能覆盖同名不同字节的包。先上传并完整下载比对 SHA-256，再以临时文件加 rename 原子替换无 BOM 的 manifest.json；清单 no-store，安装包一年 immutable 缓存。
 
-## 下载清单
+联合清单包含 product、protocolVersion、releasedAt、顶层 Windows version、downloads.windows/android；平台项包含 url、file、sha256、sizeBytes、versionName，Windows 附 signatureStatus，Android 附递增 versionCode。两份本地构建 manifest 不是联合清单。只发布一端时保留另一端经核实的完整信息。
 
-服务器下载目录为 `/srv/www/codex-assistant/downloads`，公网入口为 `https://server.example.com/codex-assistant/downloads/`。EXE/APK 文件名包含版本且使用长期不可变缓存，发布后不能用不同字节覆盖同名文件。
+当前两端联合发布使用 `scripts/publish-clients-production.ps1 -Server deployment-host`。脚本核对源码版本、本地文件大小和哈希，再上传到独立临时目录；拒绝版本倒退及覆盖同名不同内容的安装包。经公网 HTTPS 完整下载校验两份安装包后，原子切换联合清单，并从本机再次检查公网清单。上传或包校验失败时保留旧清单及现场；原始产物清单位于 artifacts，不写入源码。
 
-先上传并核对每个安装包的 SHA-256，再发布 UTF-8 无 BOM 的 `manifest.json`。清单通过 `no-store` 禁止缓存；应使用临时文件与 rename 原子替换。最后通过公网下载完整文件并再次比对哈希。
-
-清单包含 `product=CodexAssistant`、`protocolVersion`、`releasedAt`、顶层 Windows `version`，以及 `downloads.windows` 与 `downloads.android`。两者都必须包含 `url`、`file`、`sha256`、`sizeBytes`、`versionName`；Windows 还包含 `signatureStatus`，Android 还包含递增的 `versionCode`。Android 检查更新只读取当前约定字段，网络与解析都在 IO 线程执行，按 versionCode 判断新版本；下载按钮打开系统浏览器，不自动覆盖安装。
-
-两个构建脚本生成的本地 manifest.json 只是各平台构建信息，不是线上联合清单，不能直接覆盖服务器清单。Windows 本地产物名为 `CodexAssistant Setup <版本>.exe`，上传时按线上约定命名为 `CodexAssistant-<版本>.exe`；哈希针对实际上传字节计算。只发布一个平台时，从现有线上清单保留另一个平台的全部信息。
-
-Windows 使用 semver 比较顶层 version，仅提示更高的有效版本；Android 按 versionCode 判断是否更新。桌面没有 Android 同等的清单结构和大小校验。下载交给浏览器，两端都不会自动验证所下载文件的 SHA-256；发布端的完整下载校验不能省略。
+Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错。下载仅交给系统浏览器，应用不自动安装或验证下载哈希。只有清单成功返回后才能提示是否有更新。
 
 ## 服务端与回滚
 
-客户端修复若未改变协议或 schema，不需要删除服务端数据。服务端通过 `scripts/deploy-production.ps1` 发布独立 release 并检查 health。回滚只切换已验证的 release；schema 不同直接拒绝，不执行 migration。安装包、APK、签名材料和测试截图均不提交到版本库。
+`scripts/deploy-production.ps1` 会修改目标服务器，依赖 SSH/scp/sudo、配置中 Node 路径和既有主站 Nginx 文件；调用前必须明确目标和发布授权。本轮已按用户部署授权执行，同schema保留现有业务数据。
 
-部署脚本在修改前记录 current 并备份 systemd unit、Nginx snippet 和主配置到 /var/backups/codex-assistant/<release-id>。schema 不匹配时停止服务，将原数据库及 WAL/SHM 保存到该备份目录后创建干净状态。失败时恢复配置、旧状态及 current，再重启旧服务；失败的新状态单独保留，不覆盖旧库。成功后保留恢复备份。回滚是发布故障恢复，不是协议兼容或 migration。
+脚本安装不可变 release，记录原 current，并备份 systemd unit、Nginx snippet/主配置至 `/var/backups/codex-assistant/<release-id>`。schema 不匹配时停服务，保存旧库及 WAL/SHM，再建立空状态；同 schema 保留业务数据。失败时恢复配置、旧状态和 current，失败的新状态单独保留。回滚是部署故障恢复，不是协议兼容或迁移。
 
-确认安装包已发布后，可用 `npm run clean -- -WhatIf` 查看本地清理范围，再运行 `npm run clean` 删除生成物。源码、版本声明和文档变更提交 Git，二进制包不提交。
+成功后检查回环/公网 health、Token 鉴权、实际快照；客户端消息还需单独明确授权的验收会话。真实 OEM 后台、签名信任、生产资源限额分别验收。
 
+`scripts/acceptance/production-readonly.mjs` 在目标服务器执行，读取既有环境凭据，检查公网鉴权、HTTP/WS 快照、Trace 父节点及订阅释放。只输出计数与布尔结果，不写业务事件、不发送消息、不打印任务正文或 Token；执行方式见[验收脚本说明](../scripts/acceptance/README.md#生产部署后只读检查)。
 
-## 2026-09-10 修复验收
-
-本轮设计修订和实现验收的最新证据见 [验收记录](acceptance.zh-CN.md)。历史安装包和旧测试计数不作为本轮通过依据。
-
-2026-09-10 已部署生产 release `private-release-id`，并发布 Windows 2.0.12 与 Android 2.0.10（versionCode=13）及联合清单。旧数据库与旧下载清单保存在 `/var/backups/codex-assistant/private-release-id`。线上检查与保留限制以 [验收记录](acceptance.zh-CN.md) 为准。Electron 更新为 44.3.0，ws 为 8.21.3。
-
-2026-09-12 已发布客户端网络恢复修复包：Windows 2.0.13、Android 2.0.12（versionCode 15）。服务端、协议和 SQLite schema 没有变化，保留已验证的服务端 release；联合清单已原子更新，旧清单保存于 `/var/backups/codex-assistant/20260912-network-recovery/download-manifest.json`。完整公网下载哈希、缓存头和健康检查见 [验收记录](acceptance.zh-CN.md)。
-
-2026-09-12 已发布 active-writer 误判修复包：Windows 2.0.14、Android 2.0.13（versionCode 16）。工作站在 `resume` 冲突后仅对本进程已观察的活动回合执行 `steer`，避免将其他实例回合接管。协议和 SQLite schema 不变；发布包为版本化不可变文件，哈希与公网验收见 [验收记录](acceptance.zh-CN.md)。
-
-## 2026-09-14 构建与部署记录
-
-协议、服务端和 Windows 2.0.15 构建通过，Windows NSIS 安装包已生成，未启用 Authenticode 签名。Android 2.0.14（versionCode 17）Debug APK 构建通过，SHA-256 为 `d497146e353fae8ad0d5a63c369c3b21f22bb2c63edb45a3ddbffa86a70456aa`；生产 Release 因本机缺少 keystore 未签名。Windows 安装包 SHA-256 为 `127c7ca85a376c511f49c4b44760642beaae9dc7363ee272ff7cf9acd08b4b55`。服务端部署脚本已执行构建，但上传阶段因 SSH 主机别名 `deployment-host` 无法连接而停止，未切换线上 current，线上数据未被修改。
+安装包与原始报告不提交 Git。需要保留最终交付物时先复制到工作区之外，再执行 `npm run clean -- -WhatIf` / `npm run clean`。

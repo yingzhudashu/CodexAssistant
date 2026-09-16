@@ -46,9 +46,9 @@ it("allows local sending during cloud sync/offline and preserves a draft while t
 
 it("keeps Windows and Android task filter names and order identical to the four-state protocol", async () => {
   const desktop = await readFile(new URL("../src/renderer/workspace.js", import.meta.url), "utf8");
-  const labels = runInContext(`(${desktop.match(/const labels = (.*);/)![1]})`, createContext());
+  const labels = runInContext(`(${desktop.match(/const labels = ({[\s\S]*?});/)![1]})`, createContext());
   expect(Object.keys(labels).sort()).toEqual(TaskStatusSchema.anyOf.map(status => status.const).sort());
   const android = await readFile(new URL("../../../android/app/src/main/java/site/codexassistant/TaskPresentation.kt", import.meta.url), "utf8");
-  const filters = [...android.match(/val taskStatusFilters = listOf\(([\s\S]*?)\n\)/)![1].matchAll(/"([a-z_]+)" to "([^"]+)"/g)].map(row => [row[1], row[2]]);
+  const filters = [...android.match(/val taskStatusFilters\s*=\s*listOf\(([\s\S]*?)\n\s*\)/)![1].matchAll(/"([a-z_]+)" to "([^"]+)"/g)].map(row => [row[1], row[2]]);
   expect(filters).toEqual([["all", "全部"], ...Object.entries(labels)]);
 });
