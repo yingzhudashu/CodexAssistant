@@ -36,19 +36,23 @@ fun statusLabel(status: String): String =
 
 data class TaskNotice(val title: String, val text: String, val detail: String, val silent: Boolean)
 
-/** 节流只限制声音，不丢弃最终状态；调用方每次都更新同一任务的通知。 */
+/** 普通进度声音节流不能压住首次待确认/完成/失败提醒；文本始终更新为最新状态。 */
 class TaskNotices {
-    private val lastAlertAt = mutableMapOf<String, Long>()
+    private val lastAlertAt = mutableMapOf<String, MutableMap<String, Long>>()
 
     fun retain(ids: Set<String>) {
         lastAlertAt.keys.retainAll(ids)
     }
 
-    fun change(previous: TaskSnapshot, next: TaskSnapshot, now: Long): TaskNotice {
-        val last = lastAlertAt[next.id]
+    fun change(previous: TaskSnapshot?, next: TaskSnapshot, now: Long): TaskNotice {
+        val alerts = lastAlertAt.getOrPut(next.id) { mutableMapOf() }
+        val important = next.status != "running" && previous?.status != next.status
+        val last = if (important) alerts[next.status] else alerts.values.maxOrNull()
         val silent = last != null && now - last < 10_000L
-        if (!silent) lastAlertAt[next.id] = now
-        val transition = "${statusLabel(previous.status)} → ${statusLabel(next.status)}"
+        if (!silent) alerts[next.status] = now
+        val transition =
+            if (previous == null) "新任务 · ${statusLabel(next.status)}"
+            else "${statusLabel(previous.status)} → ${statusLabel(next.status)}"
         val step = next.plan.find { it.id == next.currentStepId }?.title
         return TaskNotice(
             "${statusLabel(next.status)} · ${next.title}",

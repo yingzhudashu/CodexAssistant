@@ -1,6 +1,6 @@
 # 当前审查与验收
 
-本文件描述当前版本的本地验收与2026-09-16生产发布验证。Windows 2.0.16、Android 2.0.15/code18已发布；协议v3、schema6。没有向用户真实Codex会话发送测试消息，也没有操作连接的物理手机。
+本文件描述当前版本的本地验收与2026-09-16生产发布验证。Windows 2.0.16、Android 2.0.16/code19已发布；协议v3、schema6。没有向用户真实Codex会话发送测试消息，也没有操作连接的物理手机。
 
 ## 改动与验收矩阵
 
@@ -11,20 +11,26 @@
 |桌面采集|outbox批写、上传预算、严格确认、Trace独立上传、日志轮转|Monitor、Trace、生命周期回归|
 |上下文链路|poll→事件→上传/HTTP/ingest/Android reducer关联|W3C父节点、上传属性过滤和失败隔离回归|
 |Electron|安全IPC、代次隔离、Markdown、保持未变DOM、清筛选/复制/清草稿|真实renderer合成IPC验收及主进程保存/迟到回调回归|
-|Android|唯一连接、网络恢复、有界回执/详情、配置代次、草稿保留、通知文本更新|16项JUnit、Debug构建/lint、专用模拟器|
-|文档|逐文档改写现状、协议/设计对齐、去历史发布与过程记录|递归链接、版本、协议字段、13功能视图/30动作/58图静态与Edge图文校验|
+|Android|唯一连接、通知变化独立记录/确认、重连补报、specialUse订阅、电池设置、通知耗时Trace|24项JUnit、Debug构建/lint、后台/突发/休眠通知及Release启动|
+|文档|逐文档改写现状、协议/设计对齐、去历史发布与过程记录|递归链接、版本、协议字段、13功能视图/31动作/59图静态与Edge图文校验|
 
-Node最新完整回归：16个测试文件、69项通过。覆盖服务端、协议、Monitor、生命周期、交互、宿主管道、Markdown、Trace、主进程退出和配置切换。Android最新JUnit：4套件16项通过；lint为0错误16警告，保留项是target SDK及依赖更新提示，不冒充零警告，也不为消警告盲目升级整套Android工具链。
+Node最新完整回归：16个测试文件、69项通过。覆盖服务端、协议、Monitor、生命周期、交互、宿主管道、Markdown、Trace、主进程退出和配置切换。Android最新JUnit：5套件24项通过；lint为0错误17警告。16项为既有target SDK/依赖更新提示，新增BatteryLife提示对应用户主动申请电池豁免的权限；本应用使用自托管即时通知连接，已在设计说明记录用途及耗电取舍，不隐藏该提示。
 
 ## 实际界面与恢复
 
-Electron合成验收通过preload、设置、深色状态、交互提交、消息接受、失败草稿、发送期间编辑、节点/焦点稳定、Markdown结构/安全、千条列表和紧凑窗口。故意拒绝一次发送会输出“验收拒绝”，属于失败分支测试。截图等待绘制后取得，并人工检查，不能只看DOM布尔值。SVG/HTML在Edge中逐图检查越界、图片加载和锚点，58图无问题。
+Electron合成验收通过preload、设置、深色状态、交互提交、消息接受、失败草稿、发送期间编辑、节点/焦点稳定、Markdown结构/安全、千条列表和紧凑窗口。故意拒绝一次发送会输出“验收拒绝”，属于失败分支测试。截图等待绘制后取得，并人工检查，不能只看DOM布尔值。SVG/HTML在Edge中逐图检查越界、图片加载和锚点，59图无问题。
 
-Android专用emulator-5580通过多选与文本交互、摘要读取/刷新/复制、合成消息回执、返回后草稿、清空草稿和主题入口。模拟器初始System UI无响应弹窗经等待恢复；旧测试应用签名不同，仅在此专用AVD卸载重装Debug。未重置物理设备。
+既有2.0.15 Debug基础验收：专用emulator-5580通过多选与文本交互、摘要读取/刷新/复制、合成消息回执、返回后草稿、清空草稿和主题入口。模拟器初始System UI无响应弹窗经等待恢复；旧测试应用签名不同，仅在此专用AVD卸载重装Debug。未重置物理设备。
 
-网络恢复20次前后台，每次只有1个连接且有新快照，耗时1656–2281ms；3次关闭并恢复原启用接口为1000/954/859ms；服务端主动关闭后1172ms恢复。最后active=1、writes=0。第一轮脚本只启用未关联Wi-Fi导致无默认网络，已修正为恢复原接口并重跑通过，不把该测试夹具错误写成产品修复。
+既有2.0.15 Debug网络验收：20次前后台，每次只有1个连接且有新快照，耗时1656–2281ms；3次关闭并恢复原启用接口为1000/954/859ms；服务端主动关闭后1172ms恢复。最后active=1、writes=0。第一轮脚本只启用未关联Wi-Fi导致无默认网络，已修正为恢复原接口并重跑通过，不把该测试夹具错误写成产品修复。
 
 官方Codex仅只读验证：启动、列出线程和读取Goal成功，启动加列表约601ms；未保存真实标识或正文。实际Desktop私有发送通道由合成协议测试覆盖，**本轮未重新发送真实消息**。
+
+## Android 2.0.16通知验收
+
+最终code19 Debug在专用emulator-5580进行12次后台任务状态变化，实际系统活动通知更新时间297–828ms；服务端断线后最终快照补报1594ms；40次突发事件后的最终状态468ms；临时授予电池豁免并强制深度休眠后641ms；唤醒后313ms。耗时包含HTTP注入及ADB轮询，不能直接当作纯应用耗时或所有手机SLA。通知投递Trace已上传，结束时唯一连接active=1、短时CPU锁释放。模拟器强制休眠不能代替真实厂商休眠策略。
+
+设置页验证了拒绝授权、允许授权、返回后读取状态和按钮显隐。Release APK实际安装后验证首次连接表单、设置页及specialUse前台服务启动，使用合成凭据与故意不可用的回环HTTPS地址，未连接生产。完整业务通知链路在Debug合成服务上测试，不冒充Release真实网络端到端验收。截图已检查，模拟器与测试服务已关闭，临时电池/休眠设置已恢复。
 
 ## 性能结果
 
@@ -32,11 +38,11 @@ Android专用emulator-5580通过多选与文本交互、摘要读取/刷新/复�
 
 ## 构建与交付状态
 
-Debug APK位于android/app/build/outputs/apk/debug，模拟器功能与网络恢复测试使用此构建。Android 2.0.15/code18 Release已重新构建并发布，通过apksigner v2签名校验，大小2188275字节，最终发布SHA-256为 `21ca12a115fc2acda0e32b8847919e71b7b96d6ad0430f3d6f458b59b1bcfd3c`；Release包尚未安装运行，不能把Debug运行结果表述为Release运行验收。
+Debug APK位于android/app/build/outputs/apk/debug，模拟器功能与网络恢复测试使用此构建。Android 2.0.16/code19 Release已重新构建并发布，通过apksigner v2签名校验，大小2204959字节，最终发布SHA-256为 `4a34425d7abd7fb2603df46e18ab3d05e52c9c6f984547b941bdc25cbc084e5a`；Release包完成专用模拟器安装和启动验收，业务网络及通知场景仍以Debug测试为准。
 
 Windows 2.0.16 NSIS已重新构建并发布（NotSigned），大小112034848字节，最终发布SHA-256为 `ac4149b936156bbc6ed3e6e0a2f1858ad19a6aa894ce74366fcd1856c2b53190`，本轮未执行安装器。两个安装包的哈希与大小均保存在各自产物manifest及公网联合清单。两端安装包均经公网HTTPS完整下载比对哈希，清单在两份文件校验后原子替换，本机再次校验清单文本和no-store响应头。安装包、截图和原始报告位于忽略的artifacts目录，不提交Git。
 
-生产服务器 `deployment-host` 当前release为 `private-release-id`，配置恢复备份位于 `/var/backups/codex-assistant/private-release-id`。同schema保留现有任务。公网health、未授权401、授权HTTP快照、WSS鉴权/订阅/释放、HTTP Trace父节点和非法查询422均通过，只读验收业务写入0。检查时service为active/running、自动重启0、Trace导出失败0。该检查确认部署与读取链路，不代替真实客户端发送或生产容量测试。
+生产服务器 `deployment-host` 当前release为 `private-release-id`，配置恢复备份位于 `/var/backups/codex-assistant/private-release-id`。服务端该次部署同schema保留现有任务；本次Android通知补丁不修改服务端业务数据。公网health、未授权401、授权HTTP快照、WSS鉴权/订阅/释放、HTTP Trace父节点和非法查询422均通过，只读验收业务写入0。检查时service为active/running、自动重启0、Trace导出失败0。该检查确认部署与读取链路，不代替真实客户端发送或生产容量测试。
 
 已删除设计source-baseline、artifact-manifest、validation和review四份过程文件，生成工具改为把报告写artifacts。旧review-preview.png的删除被自动安全审查拒绝（仅返回blocked by policy），已解除引用但暂未删除。其余历史忽略产物可由清理脚本预览后清除；本轮最终产物保留供审查。
 
@@ -47,6 +53,6 @@ Windows 2.0.16 NSIS已重新构建并发布（NotSigned），大小112034848字�
 - Desktop管道是非公开接口；目标版本真实消息接收需明确授权验收会话，不能以只读验证代替。
 - 多工作站同task.id合并、多租户权限、完整对话回复流不是当前产品合同。
 - 最后一次stream拆分/交互背压改动未重跑30分钟，已有针对性回归；生产磁盘、反代和unit资源限额未压测。
-- 已部署服务器并发布联合清单；签名信任与真实覆盖安装仍独立于Debug构建，未完成安装器和Release APK的实机运行验收。
+- 已部署服务器并发布联合清单；签名信任与真实覆盖安装仍独立于Debug构建，Windows安装器覆盖安装、Release真实网络端到端及物理手机运行尚未验收。
 
 复现命令与隔离边界见[验收脚本](../scripts/acceptance/README.md)，发布要求见[发布说明](release.zh-CN.md)。

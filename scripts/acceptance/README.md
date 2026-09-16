@@ -46,3 +46,9 @@ node --import tsx scripts/acceptance/ui-server.ts
 完成目标服务器部署后，将 `production-readonly.mjs` 复制到该服务器临时目录，再使用 `/opt/node-v22.23.2-linux-x64/bin/node` 执行。执行用户需能读取 `/etc/codex-assistant/codex-assistant.env`；脚本复用当前 release 的 ws 依赖。执行结束删除本次上传的脚本。
 
 检查范围包括公网 health、未授权请求401、授权任务快照、WSS鉴权/订阅/释放、HTTP Trace父节点及非法查询422。脚本不发送业务事件或控制消息，凭据不离开服务器；诊断请求仍会产生正常Trace记录。输出仅为布尔结果与数量，不包含真实任务正文或标识。为可靠比较HTTP/WS计数和业务事件数，选择业务上传空闲窗口；并发业务变更可能使一致性断言失败，需核实原因，不能自动重置数据。
+
+## Android后台通知
+
+停止其他33241端口夹具，运行 `node --import tsx scripts/acceptance/notifications-server.ts`，在专用emulator-5580安装Debug包并配置回环地址与合成Token，再执行 `python scripts/acceptance/android-notifications.py`。脚本等待实际前台服务及初始快照，再检查系统活动通知记录中的最新标题，覆盖12次后台变化、重连补报、40次突发事件、授予电池豁免后的强制休眠、唤醒恢复和短时CPU锁释放。记录总耗时包含ADB轮询，不等于纯应用耗时；Trace只测到系统API调用结束。
+
+仅对专用模拟器临时改变deviceidle白名单、休眠和电池状态，finally恢复；不操作物理手机。通知声音以构造参数和系统状态检查为主，实际音量/勿扰/厂商行为需要真机确认。Release包另外检查首次启动、连接表单、设置和specialUse服务启动；业务通知链路在合成Debug环境测试。

@@ -9,41 +9,32 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-
-internal data class NotificationSnapshot(
-    val connection: String,
-    val running: Int,
-    val needsAction: Int,
-)
-
-internal fun notificationSnapshot(state: TaskState) =
-    NotificationSnapshot(
-        connection = connectionSummary(state),
-        running = state.tasks.count { it.status == "running" },
-        needsAction = state.tasks.count { it.status == "needs_action" },
-    )
 
 /** Android 不依赖厂商推送：以前台服务保持唯一 WebSocket， 并在任务状态或当前步骤变化时更新常驻通知，同时发出一次简短本地通知。 */
 class SyncForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var collectJob: Job? = null
-    private var previous = emptyMap<String, TaskSnapshot>()
     private val notices = TaskNotices()
-    private var wasConnected = false
-    private var lastNotificationSnapshot: NotificationSnapshot? = null
-    private var notificationJob: Job? = null
+    private val postedTaskIds = linkedSetOf<String>()
+    private var processingWakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        getSystemService(NotificationManager::class.java)
+            .activeNotifications
+            .filter { it.id == 0 && it.tag != null }
+            .sortedBy { it.postTime }
+            .forEach { postedTaskIds.add(it.tag) }
         val coordinator = (application as CodexAssistantApplication).sync
         try {
             startForegroundCompat(baseNotification("正在同步 Codex 任务"))
@@ -56,40 +47,52 @@ class SyncForegroundService : Service() {
             stopSelf()
             return
         }
+        processingWakeLock =
+            getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "CodexAssistant:notification")
+                .apply { setReferenceCounted(false) }
+        val delivery =
+            NotificationDelivery(
+                scope,
+                postTask = postTask@{ change ->
+                        if (change.connectionEpoch != coordinator.state().value.connectionEpoch)
+                            return@postTask
+                        coordinator.traceLogger.span(
+                            "android.sync.notification_post",
+                            change.traceId,
+                        ) {
+                            notifyChange(change.previous, change.task)
+                        }
+                        coordinator.traceLogger.timing(
+                            "android.sync.notification_delivery",
+                            change.traceId,
+                            (android.os.SystemClock.elapsedRealtime() - change.receivedAt)
+                                .coerceAtLeast(0),
+                        )
+                        coordinator.uploadTrace()
+                        coordinator.acknowledgeNotification(
+                            change.connectionEpoch,
+                            change.task.id,
+                            change.revision,
+                        )
+                    },
+                postSummary = { updateNotification(it.text) },
+                reset = {
+                    val manager = getSystemService(NotificationManager::class.java)
+                    postedTaskIds.forEach { manager.cancel(it, 0) }
+                    postedTaskIds.clear()
+                    notices.retain(emptySet())
+                },
+                workChanged = { pending ->
+                    // 只覆盖已收到事件的短时通知处理，不以永久CPU锁保活或绕过Doze网络限制。
+                    processingWakeLock?.let { wake ->
+                        if (pending) wake.acquire(10_000L) else if (wake.isHeld) wake.release()
+                    }
+                },
+            )
         coordinator.serviceStarted(this)
         collectJob = scope.launch {
-            coordinator.state().collectLatest { state ->
-                val current = state.tasks.associateBy { it.id }
-                // 一次服务端回放可能包含同一任务的多次变化。每个任务十秒内只提醒一次，
-                // 仍会更新同一通知 ID 的最终状态，避免恢复游标时产生通知轰炸。
-                current.values
-                    .filter { next ->
-                        if (!state.connected || !wasConnected) return@filter false
-                        val old = previous[next.id]
-                        old != null &&
-                            (old.status != next.status || old.currentStepId != next.currentStepId)
-                    }
-                    .forEach { next -> notifyChange(previous.getValue(next.id), next) }
-                notices.retain(current.keys)
-                wasConnected = state.connected
-                previous = current
-                val snapshot = notificationSnapshot(state)
-                if (snapshot != lastNotificationSnapshot) {
-                    notificationJob?.cancel()
-                    notificationJob = scope.launch {
-                        kotlinx.coroutines.delay(200)
-                        if (snapshot != lastNotificationSnapshot) {
-                            lastNotificationSnapshot = snapshot
-                            updateNotification(
-                                when {
-                                    state.connected -> "同步中 · ${snapshot.running} 个进行中任务"
-                                    else -> connectionSummary(state)
-                                }
-                            )
-                        }
-                    }
-                }
-            }
+            coordinator.state().collect(delivery::update)
         }
     }
 
@@ -99,17 +102,11 @@ class SyncForegroundService : Service() {
         return START_STICKY
     }
 
-    override fun onTimeout(startId: Int, fgsType: Int) {
-        // 系统用尽dataSync额度后必须按期停止服务；前台界面仍可拥有连接。
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        (application as CodexAssistantApplication).sync.serviceStopped(this, unavailable = true)
-        stopSelf()
-    }
-
     override fun onDestroy() {
-        notificationJob?.cancel()
         collectJob?.cancel()
         scope.cancel()
+        processingWakeLock?.let { if (it.isHeld) it.release() }
+        processingWakeLock = null
         (application as CodexAssistantApplication).sync.serviceStopped(this)
         super.onDestroy()
     }
@@ -156,6 +153,7 @@ class SyncForegroundService : Service() {
             .setOngoing(ongoing)
             .setAutoCancel(autoCancel)
             .setOnlyAlertOnce(ongoing)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setCategory(
                 if (ongoing) NotificationCompat.CATEGORY_SERVICE
                 else NotificationCompat.CATEGORY_STATUS
@@ -167,11 +165,12 @@ class SyncForegroundService : Service() {
         baseNotification(text, SYNC_CHANNEL_ID, ongoing = true, autoCancel = false)
 
     private fun startForegroundCompat(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+        // 长期即时通知订阅使用声明了具体用途的specialUse；不是有结束期限的数据传输任务。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
             )
         else startForeground(NOTIFICATION_ID, notification)
     }
@@ -181,7 +180,7 @@ class SyncForegroundService : Service() {
             .notify(NOTIFICATION_ID, baseNotification(text))
     }
 
-    private fun notifyChange(previousTask: TaskSnapshot, task: TaskSnapshot) {
+    private fun notifyChange(previousTask: TaskSnapshot?, task: TaskSnapshot) {
         val notice = notices.change(previousTask, task, android.os.SystemClock.elapsedRealtime())
         val intent = Intent(this, MainActivity::class.java)
         val pending =
@@ -212,7 +211,19 @@ class SyncForegroundService : Service() {
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .build()
         // tag 使用完整任务 ID，避免 hashCode 碰撞或覆盖常驻通知。
-        getSystemService(NotificationManager::class.java).notify(task.id, 0, notification)
+        val manager = getSystemService(NotificationManager::class.java)
+        // Android限制每个应用的活动通知总量。为常驻和系统分组留余量，保留最近40个任务。
+        // 超额时移除最旧提醒，业务任务仍完整保存在列表中，不能让系统拒绝最新提醒。
+        if (task.id !in postedTaskIds)
+            while (postedTaskIds.size >= 40) {
+                val oldest = postedTaskIds.first()
+                manager.cancel(oldest, 0)
+                postedTaskIds.remove(oldest)
+            }
+        manager.notify(task.id, 0, notification)
+        postedTaskIds.remove(task.id)
+        postedTaskIds.add(task.id)
+        notices.retain(postedTaskIds)
     }
 
     companion object {

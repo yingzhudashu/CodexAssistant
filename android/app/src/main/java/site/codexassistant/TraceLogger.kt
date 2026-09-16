@@ -38,6 +38,11 @@ class TraceLogger(
         record(name, traceId, 0)
     }
 
+    /** 显式记录队列等待等跨协程耗时，只接受非负时长，不携带任务正文。 */
+    fun timing(name: String, traceId: String, durationMs: Long) {
+        record(name, traceId, durationMs.coerceAtLeast(0))
+    }
+
     @Synchronized fun pending(limit: Int = 100): List<TraceSpan> = pending.values.take(limit)
 
     @Synchronized

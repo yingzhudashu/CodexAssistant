@@ -6,7 +6,7 @@
 
 Application 创建唯一 Coordinator。Activity.onStart 注册可见并申请前台服务，onStop 释放可见；旋转不视为真正进入后台。服务按实例注册/销毁，旧实例迟到销毁不能解除新所有者。至少一个所有者存在且有凭据时维持唯一 Repository/收集任务；全部退出才关闭。
 
-Coordinator 注册一个默认网络回调，停止时注销。网络标识去重，旧网络 onLost 不取消新网络。存在默认网络表示可尝试，不要求系统 VALIDATED；连通性以服务鉴权和 snapshot 为准。回前台重新读取默认网络。
+Coordinator 注册一个默认网络回调，停止时注销。网络标识去重，旧网络 onLost 不取消新网络。存在默认网络表示可尝试，不要求系统 VALIDATED；连通性以服务鉴权和 snapshot 为准。回前台重新读取默认网络。亮屏及退出休眠广播也会主动校准连接，不等待默认网络再次变化；停止时注销网络回调和广播。
 
 ## 状态机
 
@@ -22,11 +22,11 @@ Coordinator 注册一个默认网络回调，停止时注销。网络标识去�
 |auth_failed/protocol_error|永久错误，不因网络/前台信号重复拨号；重新保存配置解除|
 |停止/重配|先失效旧代次，再取消 socket/Job/HTTP；旧回调不能写状态|
 
-OkHttp connectTimeout=10 秒、pingInterval=30 秒；从拨号起总握手 25 秒，onOpen 后到 snapshot 15 秒，取先到期限。期限使用 elapsedRealtime，UI 的 retryAtEpochMs 只用于显示。前台服务不保证网络永不断开，Doze/系统冻结不承诺固定恢复时延。
+OkHttp connectTimeout=10 秒、pingInterval=15 秒，复用OkHttp的ping/pong检测半开连接；从拨号起总握手 25 秒，onOpen 后到 snapshot 15 秒，取先到期限。期限使用 elapsedRealtime，UI 的 retryAtEpochMs 只用于显示。前台服务不保证网络永不断开，Doze/系统冻结不承诺固定恢复时延。
 
 ## 数据和写入
 
-回放最多 500 条（受服务发送预算限制），完整 snapshot 校准；重复序号忽略。只在当前连接接收有效事件/快照时保存游标。回放阶段不触发历史变化提醒，快照后实时变化才提醒。
+回放最多 500 条（受服务发送预算限制），完整 snapshot 校准；重复序号忽略。只在当前连接接收有效事件/快照时保存游标。首次快照只建立通知基线；重连回放期间不逐条提醒，收到最终快照后与断线前基线比较，每个任务仅补发最新变化。实时事件在Repository内记录通知变化，不依赖UI是否及时收集状态。
 
 TaskRepository 回调在同一锁内串行化；callbackFlow/StateFlow 可合并中间状态，普通回执按 requestId 累积到最多 1000 条，避免慢 UI 丢回执。交互终态同样有界。详情传输缓存最近 20 个单页，ViewModel 仅关联在途 requestId 并管理可见分页。
 
@@ -38,12 +38,22 @@ TaskRepository 回调在同一锁内串行化；callbackFlow/StateFlow 可合并
 
 Coordinator 和 Repository 共享 TraceLogger；连接 trace 与业务事件 trace 分离，reducer 接续事件父节点。上传合并 500ms，15 秒有限 HTTP 请求；队列及父节点索引各 100，异常不取代业务结果。
 
-同步状态、后台服务状态和系统网络是不同字段。常驻通知去重包含连接说明，offline→认证错误也更新文本。任务通知十秒仅限制声音，不丢弃最新状态。通知点击打开应用，由任务列表选择目标；没有通知直接定位任务的协议。
+同步状态、后台服务状态和系统网络是不同字段。通知变化按任务保留最新版本，最多1000个任务，跨callbackFlow/StateFlow合并仍可读取。通知发送使用单一串行队列：同一任务待发送内容被最新状态替换，首条立即发送，随后两次系统通知调用至少间隔300ms；持续事件不会重置发送期限。常驻通知显示进行中/待确认数量，与任务通知共享发送预算，防止突发调用触发系统限速后遗留旧内容。普通进度声音最多每十秒一次；待确认、完成、失败按各自状态独立节流，首次关键状态不会被之前的普通进度提醒静音。文本始终更新。通知点击打开应用，由任务列表选择目标；没有通知直接定位任务的协议。
 
-系统拒绝前台服务或 dataSync 超时，显示后台同步不可用/停止；超时回调主动 stopSelf，不从后台网络回调绕过限制拉起服务。可见 Activity 仍能拥有连接。通知权限只影响可见提醒，不改 Token 状态。
+`android.sync.notification_post`记录通知API调用，`android.sync.notification_delivery`记录从接收状态到提交系统通知的本机耗时；与事件共用traceId。此耗时不代表系统最终展示或播放声音的时刻。
+
+持续即时通知订阅使用specialUse前台服务，manifest声明自托管服务实时状态提醒的具体用途；删除原dataSync声明及超时处理，不把长期订阅当作一次有结束期限的数据传输。Android 14及以上传入SPECIAL_USE类型，较低API使用对应可用的startForeground重载。仍由用户打开应用启动，不通过后台循环、精确闹钟或自动重启链绕过系统限制。拒绝启动时显示后台同步不可用，可见Activity仍能拥有连接。
+
+设置→通知显示实际电池优化状态，由用户点击“允许后台持续连接”打开系统确认；返回后重新读取授权，取消不会伪造成功。未豁免时Doze可能暂停网络。通知权限与电池优化是不同授权，厂商自启动/后台限制也需单独设置。已收到事件的通知处理持有带10秒超时的短时PARTIAL_WAKE_LOCK，队列空闲及服务销毁时释放，不持有永久CPU锁，也不宣称该锁能解除Doze网络限制。
+
+系统通知提交后按任务及revision确认，旧确认不能删除新变化；配置代次不同的通知不会发送或确认。活动任务通知保留最近40个，为常驻和系统分组留余量，避免Android每应用通知数量上限阻止新提醒；任务数据和概览计数不受影响。进程内重连可比较断线前基线；进程被杀后没有完整任务磁盘缓存，首次快照不会把全部历史任务当成新提醒。
+
+设计依据：[Android Doze与豁免说明](https://developer.android.google.cn/training/monitoring-device-state/doze-standby?hl=en)、[Android 15服务类型源码](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/core/java/android/content/pm/ServiceInfo.java)、[系统通知限速与数量限制](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/services/core/java/com/android/server/notification/NotificationManagerService.java)。持续连接与明确用途的前台通知服务参考[ntfy Android实现](https://github.com/binwiederhier/ntfy-android/blob/main/app/src/main/java/io/heckel/ntfy/service/SubscriberService.kt)，不照搬自动重启链。
 
 ## 验收
 
 自动回归覆盖唯一连接、期限、永久错误、网络切换、旧回调、刷新、通知投影、150 条突发回执的慢消费者。隔离模拟器脚本覆盖 20 次前后台、3 次断网恢复、一次服务端主动关闭，核对 active=1、快照增长、writes 不增长。
+
+通知回归覆盖StateFlow合并、首次快照静默、实时新任务、重连最终快照补报、旧revision确认、配置切换、1000项边界、连续流量不饿死发送及任务/概览共享速率。`android-notifications.py`检查实际系统通知记录、后台延迟、重连补报、40次突发事件、授予豁免后的强制休眠及CPU锁释放；结束后恢复模拟器休眠/电池设置。
 
 正常可控网络回前台到可用状态目标 ≤5 秒，网络恢复信号后立即拨号；这是验收目标，不是任意移动网络 SLA。实际本轮结果见[验收记录](acceptance.zh-CN.md)。物理手机、厂商电池策略、真实 Doze/锁屏声音、移动网络和系统长时间冻结须另测，不能用模拟器结果代替。

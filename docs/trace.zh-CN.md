@@ -8,6 +8,8 @@
 
 连接生命周期（WebSocket auth/subscribe、Android connect/authenticate/snapshot）使用独立连接 trace。服务端连接根上下文可无对应实体根 span；查询不保证是一棵无缺口树。断网、队列溢出、保留清理和客户端最终上传会导致缺段。业务状态和消息接受以业务回执为准，trace 不能证明执行完成。
 
+Android通知增加 `android.sync.notification_post`（系统通知API调用耗时）与 `android.sync.notification_delivery`（事件/补齐快照接收到调用完成的本机耗时）。实时通知继承事件traceId，重连补报关联快照连接traceId；仅记录阶段、标识和非负latencyMs。通知结束后主动调度同一有界上传器。这能区分网络接收延迟和应用内等待，但不能证明系统已绘制通知或播放声音。
+
 ## 容量与故障隔离
 
 |位置|策略|

@@ -24,6 +24,7 @@ data class TaskState(
     val connectionStatus: String = "connecting",
     val cursor: Long = 0,
     val tasks: List<TaskSnapshot> = emptyList(),
+    val taskChanges: Map<String, TaskChange> = emptyMap(),
     val error: String? = null,
     val retryAttempt: Int = 0,
     val retryAtEpochMs: Long? = null,
@@ -53,7 +54,7 @@ internal constructor(
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS)
-            .pingInterval(30, TimeUnit.SECONDS)
+            .pingInterval(15, TimeUnit.SECONDS)
             .build(),
     private val traceLogger: TraceLogger = TraceLogger(),
     private val sockets: WebSocket.Factory = client,
@@ -74,6 +75,8 @@ internal constructor(
     private var activeSocket: WebSocket? = null
     private var recovery: ((Boolean, Boolean, Boolean) -> Unit)? = null
     private var shutdown: (() -> Unit)? = null
+    private var traceUpload: (() -> Unit)? = null
+    private var acknowledgeChange: ((String, Long) -> Unit)? = null
     private var available = initialState.networkAvailable == true
     private var closed = false
     private val json = wireJson
@@ -106,6 +109,13 @@ internal constructor(
         synchronized(lock) {
             closed = true
             shutdown?.invoke()
+        }
+
+    internal fun uploadTrace() = synchronized(lock) { traceUpload?.invoke() }
+
+    internal fun acknowledgeNotification(id: String, revision: Long) =
+        synchronized(lock) {
+            acknowledgeChange?.invoke(id, revision)
         }
 
     private fun send(payload: String): Boolean =
@@ -149,6 +159,7 @@ internal constructor(
 
     fun stream(): Flow<TaskState> = callbackFlow {
         var state = initialState.copy(connected = false, details = emptyMap(), results = emptyMap())
+        val taskChanges = TaskChangeTracker(initialState)
         var socket: WebSocket? = null
         var generation = 0L
         var retryAttempt = 0
@@ -382,6 +393,12 @@ internal constructor(
                                             val event =
                                                 json.decodeFromString<EventMessage>(text).event
                                             if (event.sequence <= state.cursor) return@synchronized
+                                            if (state.connected)
+                                                taskChanges.event(
+                                                    event.task,
+                                                    event.trace.traceId,
+                                                    elapsed(),
+                                                )
                                             // 连接 span 只解释握手；事件 reducer 接续工作站上传的业务父节点。
                                             state =
                                                 traceLogger.span(
@@ -392,6 +409,7 @@ internal constructor(
                                                     state.copy(
                                                         cursor = event.sequence,
                                                         tasks = upsert(state.tasks, event.task),
+                                                        taskChanges = taskChanges.changes,
                                                         error = null,
                                                         lastConnectedAtEpochMs =
                                                             System.currentTimeMillis(),
@@ -410,6 +428,12 @@ internal constructor(
                                             activeSocket = webSocket
                                             val snapshot =
                                                 json.decodeFromString<SnapshotMessage>(text)
+                                            // 回放不会改动通知基线；用最终快照一次补齐断线期间的变化。
+                                            taskChanges.snapshot(
+                                                snapshot.tasks,
+                                                connectionTraceId,
+                                                elapsed(),
+                                            )
                                             state =
                                                 traceLogger.span(
                                                     "android.sync.snapshot",
@@ -423,6 +447,7 @@ internal constructor(
                                                         interactions = emptyMap(),
                                                         interactionResults = emptyMap(),
                                                         cursor = snapshot.cursor,
+                                                        taskChanges = taskChanges.changes,
                                                         tasks =
                                                             snapshot.tasks.sortedByDescending {
                                                                 it.updatedAt
@@ -577,9 +602,17 @@ internal constructor(
                 retryJob?.cancel()
                 retryJob = null
                 recovery = null
+                traceUpload = null
+                acknowledgeChange = null
                 client.dispatcher.cancelAll()
                 client.connectionPool.evictAll()
                 client.dispatcher.executorService.shutdown()
+            }
+            traceUpload = ::scheduleTraceUpload
+            acknowledgeChange = { id, revision ->
+                taskChanges.acknowledge(id, revision)
+                state = state.copy(taskChanges = taskChanges.changes)
+                publish()
             }
             recovery = { network, foreground, networkChanged ->
                 val changed = state.networkAvailable != network

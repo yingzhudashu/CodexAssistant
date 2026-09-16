@@ -20,6 +20,8 @@ SQLite复用固定prepared statements，同一快照仅序列化一次。诊断�
 
 桌面未变化任务不重建DOM，只更新状态/时间区域；Intl.DateTimeFormat复用，Markdown交给成熟解析器。Android回执积累防止StateFlow合并丢失结果，任务更新二分定位，避免每次全列表排序；设置复用HTTP客户端，通知仅在显示内容变化时刷新。
 
+Android通知变化保留最多1000任务的最新revision，系统发送按300ms间隔串行，最新内容替换同任务待发内容，提交后释放记录；活动任务通知保留最近40项，任务数据不清除。通知处理使用有10秒超时的短时CPU锁，空闲释放；WebSocket库心跳15秒，用更快的失效检测换取额外网络唤醒。未授予电池豁免或系统强杀时不保证息屏实时性，通知延迟与手机耗电需要分别评估。
+
 ## 本机实测口径
 
 Node v24.15.0 / Windows x64。`npm run perf:server`在独立临时SQLite使用Fastify inject，包含同进程请求生成和响应对象；不是公网请求，也不是独立服务稳态RSS。

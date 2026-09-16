@@ -1,9 +1,12 @@
 package site.codexassistant
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -14,7 +17,7 @@ class SyncCoordinator(context: Context) {
     private val connectivity = appContext.getSystemService(ConnectivityManager::class.java)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableState = MutableStateFlow(TaskState())
-    private val traceLogger = TraceLogger()
+    internal val traceLogger = TraceLogger()
     private var job: Job? = null
     @Volatile private var repository: TaskRepository? = null
     private var visible = false
@@ -23,8 +26,19 @@ class SyncCoordinator(context: Context) {
     private var background = "stopped"
     private var network: Network? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
+    private var wakeReceiver: BroadcastReceiver? = null
 
     fun state(): StateFlow<TaskState> = mutableState.asStateFlow()
+
+    internal fun uploadTrace() {
+        repository?.uploadTrace()
+    }
+
+    @Synchronized
+    internal fun acknowledgeNotification(epoch: Long, id: String, revision: Long) {
+        if (mutableState.value.connectionEpoch == epoch)
+            repository?.acknowledgeNotification(id, revision)
+    }
 
     @Synchronized
     fun foreground() {
@@ -54,11 +68,11 @@ class SyncCoordinator(context: Context) {
     }
 
     @Synchronized
-    fun serviceStopped(owner: Any, unavailable: Boolean = false) {
+    fun serviceStopped(owner: Any) {
         if (service !== owner) return
         traceLogger.event("android.service.stopped")
         service = null
-        background = if (unavailable) "unavailable" else "stopped"
+        background = "stopped"
         mutableState.value = mutableState.value.copy(backgroundSyncStatus = background)
         stopIfUnowned()
     }
@@ -123,6 +137,34 @@ class SyncCoordinator(context: Context) {
             callback = listener
             connectivity.registerDefaultNetworkCallback(listener)
         }
+        if (wakeReceiver == null) {
+            val listener =
+                object : BroadcastReceiver() {
+                    override fun onReceive(context: Context, intent: Intent) {
+                        synchronized(this@SyncCoordinator) {
+                            // 退出休眠不一定伴随默认网络切换，主动校准可能已失效的旧TCP连接。
+                            if (
+                                wakeReceiver === this &&
+                                    !appContext
+                                        .getSystemService(PowerManager::class.java)
+                                        .isDeviceIdleMode
+                            ) {
+                                refreshNetwork(foreground = true)
+                            }
+                        }
+                    }
+                }
+            wakeReceiver = listener
+            ContextCompat.registerReceiver(
+                appContext,
+                listener,
+                IntentFilter().apply {
+                    addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+                    addAction(Intent.ACTION_SCREEN_ON)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
         network = connectivity.activeNetwork
         val initial =
             mutableState.value.copy(
@@ -159,6 +201,8 @@ class SyncCoordinator(context: Context) {
         job = null
         callback?.let { connectivity.unregisterNetworkCallback(it) }
         callback = null
+        wakeReceiver?.let { appContext.unregisterReceiver(it) }
+        wakeReceiver = null
         mutableState.value =
             mutableState.value.copy(
                 connected = false,

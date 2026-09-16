@@ -231,6 +231,7 @@ internal fun SettingsPage(
                                     style = MaterialTheme.typography.titleLarge,
                                 )
                                 Text("锁屏隐藏任务正文。关闭提醒不影响应用内查看同步状态。")
+                                BackgroundSyncSettings(state)
                                 OutlinedButton(
                                     {
                                         context.startActivity(

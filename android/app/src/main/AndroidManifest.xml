@@ -1,11 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <application android:name=".CodexAssistantApplication" android:theme="@style/Theme.CodexAssistant" android:label="CodexAssistant" android:icon="@drawable/ic_app_logo" android:roundIcon="@drawable/ic_app_logo" android:usesCleartextTraffic="${usesCleartextTraffic}">
-        <service android:name=".SyncForegroundService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name=".SyncForegroundService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-visible instant task status and action notifications over a persistent connection to the user's self-hosted CodexAssistant server, including devices without Google Play services. The user starts the connection by opening the application." />
+        </service>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" />

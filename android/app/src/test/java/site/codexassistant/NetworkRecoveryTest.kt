@@ -237,6 +237,93 @@ class NetworkRecoveryTest {
     }
 
     @Test
+    fun notificationChangesSurviveUiConflationAndReconnectReplay() = runTest {
+        val sockets = Sockets()
+        var latest = TaskState()
+        val repo =
+            TaskRepository(
+                { "synthetic-test-token" },
+                { "http://127.0.0.1:1" },
+                {},
+                TaskState(networkAvailable = true),
+                elapsed = { testScheduler.currentTime },
+                traceLogger = TraceLogger {},
+                sockets = sockets,
+            )
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            repo.stream().collect {
+                latest = it
+                delay(100)
+            }
+        }
+        fun task(status: String) =
+            TaskSnapshot(
+                "notification-test",
+                "合成任务",
+                status = status,
+                runtimeStatus = "active",
+                freshness = "fresh",
+                source = "thread",
+                updatedAt = "2026-09-16T00:00:00Z",
+                changedAt = "2026-09-16T00:00:00Z",
+            )
+        fun full(status: String, cursor: Long) =
+            wireJson.encodeToString(
+                SnapshotMessage.serializer(),
+                SnapshotMessage("snapshot", PROTOCOL_VERSION, cursor, listOf(task(status))),
+            )
+        fun event(status: String, sequence: Long) =
+            wireJson.encodeToString(
+                EventMessage.serializer(),
+                EventMessage(
+                    "event",
+                    PROTOCOL_VERSION,
+                    ServerEvent(
+                        sequence,
+                        "test",
+                        sequence,
+                        "2026-09-16T00:00:00Z",
+                        TraceContext("a".repeat(32), "b".repeat(16)),
+                        task(status),
+                    ),
+                ),
+            )
+        runCurrent()
+        sockets.open()
+        sockets.message(authenticated)
+        sockets.message(full("running", 1))
+        sockets.message(event("completed", 2))
+        sockets.message(event("running", 3))
+        advanceTimeBy(200)
+        runCurrent()
+        assertEquals("running", latest.tasks.single().status)
+        assertEquals(
+            "completed",
+            latest.taskChanges.getValue("notification-test").previous!!.status,
+        )
+        val revision = latest.taskChanges.getValue("notification-test").revision
+        repo.acknowledgeNotification("notification-test", revision)
+        repo.recover(true, networkChanged = true)
+        runCurrent()
+        sockets.open()
+        sockets.message(authenticated)
+        sockets.message(event("failed", 4))
+        sockets.message(full("needs_action", 5))
+        advanceTimeBy(200)
+        runCurrent()
+        assertEquals("running", latest.taskChanges.getValue("notification-test").previous!!.status)
+        assertEquals("needs_action", latest.taskChanges.getValue("notification-test").task.status)
+        repo.acknowledgeNotification(
+            "notification-test",
+            latest.taskChanges.getValue("notification-test").revision,
+        )
+        advanceTimeBy(200)
+        runCurrent()
+        assertTrue(latest.taskChanges.isEmpty())
+        repo.stop()
+    }
+
+    @Test
     fun realWebSocketReauthenticatesTwentyTimesAndResumesCursor(): Unit = runBlocking {
         val server = MockWebServer()
         val subscriptions = CopyOnWriteArrayList<Long>()

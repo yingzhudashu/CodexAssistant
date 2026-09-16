@@ -1,8 +1,10 @@
 # 构建与发布
 
-发布状态：**已发布**。当前 Windows `2.0.16`，Android `2.0.15`（`versionCode=18`），协议 `codex-assistant.v3`，SQLite schema=6。2026-09-16 已部署至 `deployment-host`，生产 release 为 `private-release-id`，并原子更新公网联合清单。
+发布状态：**已发布**。当前 Windows `2.0.16`，Android `2.0.16`（`versionCode=19`），协议 `codex-assistant.v3`，SQLite schema=6。2026-09-16 已部署至 `deployment-host`，生产 release 为 `private-release-id`，并原子更新公网联合清单。
 
-当前下载：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)、[Android 2.0.15](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.15.apk)。两端已完整下载校验SHA-256；清单缓存为no-store，安装包缓存为immutable。产物大小、哈希和实际运行测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
+当前下载：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)。两端已完整下载校验SHA-256；清单缓存为no-store，安装包缓存为immutable。产物大小、哈希和实际运行测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
+
+Android 2.0.16为后台通知修复：独立记录变化、重连补报、固定速率发送、关键状态声音独立节流、specialUse持续订阅及用户电池豁免入口。仅更新Android安装包，Windows文件哈希和服务端release保持既有版本，联合清单已重新验证。
 
 ## 质量门
 

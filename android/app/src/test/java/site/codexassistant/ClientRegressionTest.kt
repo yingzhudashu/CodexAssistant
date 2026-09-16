@@ -138,7 +138,10 @@ class ClientRegressionTest {
         val waiting = task.copy(status = "needs_action")
         assertFalse(notices.change(task, waiting, 100).silent)
         val completed = notices.change(waiting, task.copy(status = "completed"), 200)
-        assertTrue(completed.silent)
+        assertFalse(completed.silent)
+        // 普通进度不能吞掉关键状态声音；同种关键状态短时间重复仍安静更新。
+        assertTrue(notices.change(task, waiting, 300).silent)
+        assertTrue(notices.change(task, task.copy(currentStepId = "next"), 400).silent)
         assertTrue(completed.title.startsWith("已完成"))
         assertEquals("待确认 → 已完成", completed.text)
         assertFalse(notices.change(task, task.copy(status = "failed"), 10_100).silent)
