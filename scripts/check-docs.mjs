@@ -30,13 +30,13 @@ for (const version of [desktop.version, android]) {
   if (!version || !readme.includes(version) || !release.includes(version)) errors.push(`README/release docs do not describe client version ${version ?? "missing"}`);
 }
 if (!versionCode || !readme.includes(`Android versionCode **${versionCode}**`) || !release.includes(`versionCode=${versionCode}`)) errors.push("Android versionCode in README/release docs differs from source");
-// 发布状态独立于源码版本；已发布时必须列出当前两端下载入口。
+// 发布状态独立于源码版本；公开下载指向仓库Releases，不硬编码维护者账号或私人域名。
 const publicationStates = [readme, release].map(text => text.match(/发布状态：\*\*(待发布|已发布)\*\*/)?.[1]);
 if (publicationStates.some(state => !state) || publicationStates[0] !== publicationStates[1]) errors.push('README/release publication state is missing or inconsistent');
 if (publicationStates[0] === '已发布') {
   for (const text of [readme, release]) {
     for (const file of [`CodexAssistant-${desktop.version}.exe`, `CodexAssistant-${android}.apk`]) {
-      if (!text.includes(`https://server.example.com/codex-assistant/downloads/${file}`)) errors.push(`Published download is missing: ${file}`);
+      if (!text.includes(file) || !text.includes('Releases')) errors.push(`Published release asset is missing: ${file}`);
     }
   }
 }

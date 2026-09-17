@@ -2,11 +2,11 @@
 
 Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和 HTTPS 上传，由 Fastify/SQLite 服务保存，再以 WebSocket 同步给 Android。Windows 和 Android 均支持执行计划、按需回合摘要、消息发送、结构化交互、连接设置及主题切换。
 
-发布状态：**已发布**。当前 Windows **2.0.16**、Android **2.0.16**（Android versionCode **19**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。私有部署已完成验证；具体主机、域名和release标识仅保存在仓库外的部署记录中。
+发布状态：**已发布**。当前 Windows **2.0.17**、Android **2.0.17**（Android versionCode **20**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。此次为不含私人服务器默认值的客户端发行版；私有服务器的部署参数和既有发布记录保存在仓库外。
 
-下载路径示例（请将 `server.example.com` 替换为自己的服务域名）：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)（未签名）、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)（Release签名）。Android 2.0.16修复后台通知合并、重连补报和长期订阅，新增设置→通知→允许后台持续连接。两份文件已通过公网完整下载SHA-256校验；安装及真机运行的覆盖范围见[验收记录](docs/acceptance.zh-CN.md)。
+下载入口为本仓库的 **Releases → v2.0.17 → Assets**：`CodexAssistant-2.0.17.exe`（Windows x64，未签名）、`CodexAssistant-2.0.17.apk`（Android Release签名）及 `SHA256SUMS.txt`。公开安装包不预置私人服务器，首次使用需填写自己的HTTPS根地址和Token。发布步骤见[GitHub Releases](docs/release.zh-CN.md#github-releases)，验证范围见[验收记录](docs/acceptance.zh-CN.md)。
 
-升级指引：Windows 已安装 2.0.16 可继续使用，低于该版本应更新；Android 应安装 2.0.16/code19 获取后台通知修复。安装后打开 Android 应用，在设置→通知检查通知权限和“允许后台持续连接”。服务器部署不会自动更新设备上的应用，详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
+2.0.17保留既有性能、Trace和安卓后台通知修复，清除安装包内的私人默认值与Windows标识。Android安装后在设置→通知检查通知权限和“允许后台持续连接”。Windows应用标识已规范化，旧版覆盖安装尚未验收，升级前退出旧客户端并保留本地连接及outbox。详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
 
 ## 使用边界
 

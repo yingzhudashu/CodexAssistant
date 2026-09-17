@@ -1,24 +1,32 @@
 # 构建与发布
 
-发布状态：**已发布**。当前 Windows `2.0.16`，Android `2.0.16`（`versionCode=19`），协议 `codex-assistant.v3`，SQLite schema=6。私有部署的联合清单与已发布安装包核验一致；实际主机、域名、release和备份标识仅保存于仓库外。
+发布状态：**已发布**。当前 Windows `2.0.17`，Android `2.0.17`（`versionCode=20`），协议 `codex-assistant.v3`，SQLite schema=6。发行目标为GitHub Releases的 `v2.0.17`；实际私有部署坐标与记录仅保存于仓库外。
 
-下载路径示例（`server.example.com` 为占位域名，不提供实际下载）：[Windows 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.exe)、[Android 2.0.16](https://server.example.com/codex-assistant/downloads/CodexAssistant-2.0.16.apk)。两端已完整下载校验SHA-256；清单缓存为no-store，安装包缓存为immutable。产物大小、哈希和实际运行测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
+在本仓库主页进入 **Releases → v2.0.17 → Assets**，获取 `CodexAssistant-2.0.17.exe`、`CodexAssistant-2.0.17.apk` 和 `SHA256SUMS.txt`。源码压缩包由GitHub提供，不能代替安装包。大小、哈希及测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
 
-Android 2.0.16为后台通知修复：独立记录变化、重连补报、固定速率发送、关键状态声音独立节流、specialUse持续订阅及用户电池豁免入口。修复包已发布；此次服务端重新部署复用已验证的两端2.0.16安装包，文件哈希保持不变，未覆盖不可变版本文件。联合清单、两份本地安装包与服务器文件的SHA-256和大小已重新核验。
+2.0.17基于脱敏后的源码重新打包，Android不再内置私人服务器地址，Windows应用标识统一为 `site.codexassistant`。性能、Trace及Android后台通知修复保持不变。旧版2.0.16含有私人默认值或标识，不作为GitHub公开附件。此次GitHub发行不部署服务器，不更新私人服务器的联合清单；客户端内“检查更新”仍查询用户配置的服务器清单，不能据此判断GitHub是否有新版。
 
 ## 客户端升级指引
 
 |组件|当前版本与操作|
 |---|---|
-|Windows|已安装2.0.16无需重复安装；更早版本应更新至2.0.16，取得桌面采集、outbox、Trace和界面优化。Android后台通知补丁未修改Windows代码。|
-|Android|更早版本应更新至2.0.16/code19；已安装该正式包无需重复安装。此次后台通知修复需要设备安装新APK，仅部署服务器不会生效。|
-|服务端|实际release见仓库外部署记录；协议v3、schema6。本次重新部署保留现有业务数据，不要求已经使用当前版本的客户端重装。|
+|Windows|2.0.17为通用发行版，应用标识已规范化。旧版覆盖安装未实测；升级前从托盘退出，并保留本地连接配置和outbox。安装器仍未签名。|
+|Android|2.0.17/code20使用原Release签名，保留后台通知修复；首次使用的服务地址为空，需自行填写。已保存的连接配置不会因默认值清空而删除。|
+|服务端|仍使用协议v3、schema6；本次仅发行客户端，实际release和联合清单见仓库外部署记录。|
 
 Windows在“关于与更新”、Android在设置页点击“检查更新”后，通过系统浏览器下载安装包，也可使用本页下载链接。应用不会静默安装更新。Windows升级前从托盘菜单“退出”停止工作站，安装后重新打开并检查连接和采集状态；仅关闭窗口会继续在托盘运行。Android安装后打开应用，确认连接成功，并在设置→通知核对系统通知权限、提醒渠道和电池优化状态；需要息屏及时接收时，点击“允许后台持续连接”并在系统界面确认。部分厂商还需设置自启动和后台运行权限，排查方式见[运维手册](operations.zh-CN.md#android-生命周期)。
 
 Android正式包使用既有Release签名；Debug包与正式包签名不同，不能覆盖安装。不要通过卸载应用来处理普通通知延迟，先按运维指引检查连接和系统限制。覆盖安装、真实手机长期后台运行的实测范围以[验收记录](acceptance.zh-CN.md#未覆盖与发布门槛)为准。
 
-构建源码、生成安装包、发布下载文件和部署服务端是不同操作。最近一次服务部署执行了`npm run build`，包含Windows源码编译；Windows已发布安装包继续使用经校验的2.0.16文件。本次未重新生成NSIS安装包，也未发布新的Windows版本。后续客户端代码发生变化时，应提升对应客户端版本后构建并发布，禁止覆盖同名不同内容的安装包。
+构建源码、生成安装包、上传GitHub附件和部署服务端是不同操作。客户端代码变化后先提高对应版本再构建；同名安装包不可用不同字节覆盖，私人部署记录和凭据不随安装包上传。
+
+## GitHub Releases
+
+发布前核对两端源码版本与构建manifest，解开APK及Windows安装器的应用载荷检查私人域名、标识、个人路径和凭据形状；签名校验与SHA-256校验分别执行。仓库历史脱敏不会改变旧安装包，禁止把旧包直接重命名为新版本。
+
+使用已配置的Git凭据或凭据管理器授权官方GitHub API。先创建草稿Release，上传两份安装包及 `SHA256SUMS.txt`，核对附件大小和服务器SHA-256；版本标签必须指向对应源码提交，确认附件完整后再公开。发布后再次核对Release、标签和资产状态，并下载校验文件。原始报告、含真实仓库坐标的操作记录和构建manifest保存在忽略的artifacts目录或仓库外，不进入源码提交。
+
+公开材料使用本仓库Releases入口描述下载位置，不写入维护者账号、私人域名或Git凭据。版本化发布附件与私有服务器清单分别管理，GitHub发行不会自动改写私人服务器的下载地址。
 
 ## 质量门
 
@@ -68,6 +76,6 @@ Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错�
 
 `scripts/acceptance/production-readonly.mjs` 在目标服务器执行，读取既有环境凭据，检查公网鉴权、HTTP/WS 快照、Trace 父节点及订阅释放。只输出计数与布尔结果，不写业务事件、不发送消息、不打印任务正文或 Token；执行方式见[验收脚本说明](../scripts/acceptance/README.md#生产部署后只读检查)。
 
-安装包与原始报告不提交Git。真实部署地址、SSH别名、站点配置文件名、release和备份标识、业务计数仅保存于仓库外；公开材料使用 `server.example.com`、`deployment-host` 和 `<release-id>`。已有发布文件可能包含旧的内置地址或应用标识，源码脱敏不会改变已发布字节；下一次发布必须提高版本并重新验收，不覆盖原文件。本次仅完成源码与材料脱敏，未发布替换安装包。Android后续Release构建首次启动不预填服务器，Windows应用标识统一为 `site.codexassistant`，安装身份变更后的覆盖安装需要单独验收。
+安装包不提交Git源代码历史，作为GitHub Release附件独立发布；原始报告不公开。真实部署地址、SSH别名、站点配置文件名、release和备份标识、业务计数仅保存于仓库外；公开材料使用 `server.example.com`、`deployment-host` 和 `<release-id>`。2.0.17安装包使用已脱敏源码，旧版私有产物继续留在本机与既有服务器，不能冒充公开通用发行版。Windows安装身份变化后的覆盖安装需要单独验收。
 
 需要保留最终交付物时先复制到工作区之外，再执行 `npm run clean -- -WhatIf` / `npm run clean`。

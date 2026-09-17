@@ -88,7 +88,10 @@ class ClientRegressionTest {
         for (invalid in
             listOf(
                 manifest.replace("codex-assistant.v3", "codex-assistant.v1"),
-                manifest.replace("https://server.example.com/app.apk", "http://server.example.com/app.apk"),
+                manifest.replace(
+                    "https://server.example.com/app.apk",
+                    "http://server.example.com/app.apk",
+                ),
             )) {
             assertThrows(IllegalArgumentException::class.java) { UpdateChecker.parse(invalid) }
         }
