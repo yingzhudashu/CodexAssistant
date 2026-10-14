@@ -24,6 +24,7 @@ it("bounds trace retention by arrival order, keeps newer arrivals and prunes aga
       })),
     );
     expect(database.metrics().traceSpanCount).toBe(100_000);
+    expect(database.metrics().tracePrunedSpans).toBe(1);
     expect(database.traceSpans(span(1).traceId)).toEqual([]);
     expect(database.traceSpans(span(100_001).traceId)).toHaveLength(1);
     database.recordSpan(span(100_002));
@@ -32,6 +33,7 @@ it("bounds trace retention by arrival order, keeps newer arrivals and prunes aga
     database.close();
     database = new TaskDatabase(path);
     expect(database.metrics().traceSpanCount).toBe(100_000);
+    expect(database.metrics().tracePrunedSpans).toBe(1);
     expect(database.metrics().eventCount).toBe(0);
     expect(database.traceSpans(span(100_002).traceId)).toHaveLength(1);
   } finally {

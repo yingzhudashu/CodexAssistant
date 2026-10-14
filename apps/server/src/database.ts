@@ -36,6 +36,8 @@ export type InsertResult = {
 export class TaskDatabase {
   readonly #database: DatabaseSync;
   #traceWritesSincePrune = 0;
+  // 仅统计本实例执行的诊断清理，重启后归零；不是业务事件保留指标。
+  #tracePrunedSpans = 0;
   // SQL 文本来自本模块的固定语句，容量由源码决定，不接收用户输入作为缓存键。
   readonly #statements = new Map<string, StatementSync>();
   #statement(sql: string): StatementSync {
@@ -267,11 +269,12 @@ export class TaskDatabase {
    * 只清理诊断缓存，业务事件和任务快照不受影响。
    */
   #pruneTraceSpans(): void {
-    this.#statement(
+    const result = this.#statement(
       `DELETE FROM trace_spans WHERE rowid <= (
       SELECT rowid FROM trace_spans ORDER BY rowid DESC LIMIT 1 OFFSET ?
     )`,
     ).run(MAX_TRACE_SPANS);
+    this.#tracePrunedSpans += Number(result.changes);
   }
 
   traceSpans(traceId: string, limit = 1000): TraceSpan[] {
@@ -304,6 +307,7 @@ export class TaskDatabase {
     eventCount: number;
     taskCount: number;
     traceSpanCount: number;
+    tracePrunedSpans: number;
     cursor: number;
   } {
     const row = this.#statement(
@@ -322,6 +326,7 @@ export class TaskDatabase {
       eventCount: Number(row.event_count),
       taskCount: Number(row.task_count),
       traceSpanCount: Number(row.trace_span_count),
+      tracePrunedSpans: this.#tracePrunedSpans,
       cursor: Number(row.cursor),
     };
   }

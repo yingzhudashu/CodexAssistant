@@ -5,12 +5,23 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 # 只删除固定的生成目录，不扫描任意同名目录，也不触碰业务状态、依赖或签名材料。
 $relativeTargets = @(
-    'artifacts', 'apps/desktop/build', 'apps/desktop/dist', 'apps/desktop/tsconfig.tsbuildinfo',
+    'artifacts/acceptance/design', 'artifacts/acceptance/performance.json',
+    'artifacts/acceptance/server-endurance.json', 'artifacts/acceptance/electron-smoke.json',
+    'artifacts/acceptance/windows-settings-dark.png', 'artifacts/acceptance/windows-interaction.png',
+    'artifacts/acceptance/windows-message.png', 'artifacts/acceptance/windows-compact.png',
+    'artifacts/acceptance/android-debug.png', 'artifacts/acceptance/android-detail.png',
+    'artifacts/acceptance/android-message.png', 'artifacts/acceptance/android-notifications-permission.png',
+    'artifacts/acceptance/android-notifications-settings.png', 'artifacts/acceptance/android-settings-dark.png',
+    'artifacts/acceptance/android-notifications.json', 'artifacts/acceptance/android-release-smoke.json',
+    'artifacts/acceptance/android-roundtrip.json', 'artifacts/acceptance/android-smoke.json',
+    'artifacts/acceptance-2026-09-10', 'artifacts/acceptance-2026-09-13',
+    'artifacts/network-recovery', 'artifacts/network-recovery-design', 'artifacts/verification',
+    'apps/desktop/build', 'apps/desktop/dist', 'apps/desktop/tsconfig.tsbuildinfo',
     'apps/server/dist', 'apps/server/tsconfig.tsbuildinfo',
     'packages/protocol/dist', 'packages/protocol/tsconfig.tsbuildinfo',
     'android/build', 'android/app/build', 'android/.gradle', 'android/.kotlin',
     'test-results', 'coverage', 'playwright-report',
-    'refactor-build.log', 'refactor-test.log', '%SystemDrive%'
+    'refactor-build.log', 'refactor-test.log'
 )
 $targets = @()
 foreach ($relative in $relativeTargets) {
@@ -41,6 +52,11 @@ foreach ($relative in $relativeTargets) {
 # 所有目标通过范围检查后再删除；先用 -WhatIf 可以查看将删除的准确路径。
 foreach ($target in $targets) {
     if ($PSCmdlet.ShouldProcess($target, '删除构建产物和临时文件')) {
-        Remove-Item -LiteralPath $target -Recurse -Force
+        try {
+            Remove-Item -LiteralPath $target -Recurse -Force
+        } catch {
+            # 构建守护进程可能暂时持有可再生文件；继续清理其他已核验目标并报告残留。
+            Write-Warning "清理目标被占用或无法删除，已保留：$target ($($_.Exception.Message))"
+        }
     }
 }

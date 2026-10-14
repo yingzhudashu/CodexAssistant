@@ -114,6 +114,8 @@ describe("codex assistant server", () => {
         token: "secret",
         error: "C:/private/key",
         latencyMs: "2",
+        traceDropped: "3",
+        phase: "response",
         route: "/codex-assistant/api/v3/tasks?token=secret",
       },
     };
@@ -134,7 +136,12 @@ describe("codex assistant server", () => {
       trace.spans.find(
         (entry: { spanId: string }) => entry.spanId === span.spanId,
       ).attributes,
-    ).toEqual({ error: "OPERATION_FAILED", latencyMs: "2" });
+    ).toEqual({
+      error: "OPERATION_FAILED",
+      latencyMs: "2",
+      traceDropped: "3",
+      phase: "response",
+    });
     for (const limit of ["NaN", "1.5", "-1", "1001", "Infinity", "0"])
       expect(
         (
@@ -168,6 +175,55 @@ describe("codex assistant server", () => {
         })
       ).statusCode,
     ).toBe(400);
+  });
+
+  it("reports direct trace persistence failures without changing business history", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "codex-trace-upload-fault-"));
+    directories.push(dir);
+    const server = await createApp({
+      databasePath: join(dir, "state.sqlite"),
+      accessToken: token,
+      logger: false,
+    });
+    running.push(server);
+    const failure = vi
+      .spyOn(TaskDatabase.prototype, "recordSpans")
+      .mockImplementation(() => {
+        throw new Error("DISK_FULL");
+      });
+    try {
+      const headers = { authorization: `Bearer ${token}` };
+      const response = await server.app.inject({
+        method: "POST",
+        url: "/codex-assistant/api/v3/traces/spans",
+        headers,
+        payload: {
+          protocolVersion: event.protocolVersion,
+          spans: [
+            {
+              ...event.trace,
+              name: "desktop.trace_upload.error",
+              startedAt: event.occurredAt,
+              endedAt: event.occurredAt,
+            },
+          ],
+        },
+      });
+      expect(response.statusCode).toBe(500);
+      expect(
+        (
+          await server.app.inject({
+            method: "GET",
+            url: "/codex-assistant/health",
+          })
+        ).json(),
+      ).toMatchObject({
+        traceUploadFailures: 1,
+        metrics: { eventCount: 0, traceSpanCount: 0 },
+      });
+    } finally {
+      failure.mockRestore();
+    }
   });
 
   it("propagates W3C parent context and closes unauthenticated connections promptly", async () => {

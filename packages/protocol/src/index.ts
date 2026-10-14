@@ -63,6 +63,7 @@ export function safeTraceSpan(span: TraceSpan): TraceSpan {
     "tasks",
     "outbox",
     "replayCount",
+    "traceDropped",
   ]);
   for (const [key, value] of Object.entries(span.attributes ?? {})) {
     if (numeric.has(key) && /^\d+(?:\.\d+)?$/.test(value))
@@ -80,7 +81,9 @@ export function safeTraceSpan(span: TraceSpan): TraceSpan {
       attributes[key] = value;
     else if (
       key === "phase" &&
-      /^(open|connect|authenticate|subscribe|decode|reduce|close)$/.test(value)
+      /^(open|connect|authenticate|subscribe|decode|reduce|close|request|response|receipt)$/.test(
+        value,
+      )
     )
       attributes[key] = value;
     else if (key === "source" && value === "app_server")
@@ -91,7 +94,7 @@ export function safeTraceSpan(span: TraceSpan): TraceSpan {
         : "OPERATION_FAILED";
   }
   const name =
-    /^(?:http\.(?:get|post|head|options|put|delete|patch)|server\.ingest|websocket\.(?:auth|subscribe)|desktop\.(?:poll|event|upload)(?:\.error)?|app_server\.(?:diagnostic|initialize|thread_[a-z_]+)|android\.(?:sync|lifecycle|service|refresh)\.[a-z_]+)$/.test(
+    /^(?:http\.(?:get|post|head|options|put|delete|patch)|server\.ingest|websocket\.(?:auth|subscribe)|desktop\.(?:poll|event|upload)(?:\.error)?|desktop\.trace_upload\.error|app_server\.(?:diagnostic|initialize|thread_[a-z_]+)|android\.(?:sync|lifecycle|service|refresh)\.[a-z_]+)$/.test(
       span.name,
     )
       ? span.name

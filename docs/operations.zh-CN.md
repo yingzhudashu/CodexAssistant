@@ -20,7 +20,7 @@ journalctl -u codex-assistant.service --since '10 minutes ago'
 nginx -t
 ```
 
-health 只证明服务响应；上线还须验证桌面上传、手机 snapshot 和一次明确授权的控制链路。CPU 指标是进程累计微秒，比较相邻采样；RSS 看预热后的趋势。traceFailedExports 增加说明诊断存储故障，不能推断业务事件丢失。
+health 只证明服务响应；上线还须验证桌面上传、手机 snapshot 和一次明确授权的控制链路。CPU 指标是进程累计微秒，比较相邻采样；RSS 看预热后的趋势。traceFailedExports 是服务端批导出失败次数，traceUploadFailures 是客户端直传 Trace 的存储失败次数，metrics.tracePrunedSpans 是本进程累计清理数，metrics.traceSpanCount 是当前保留数量。traceDropped 属性由桌面 span 上报本地诊断队列丢弃增量；它不包括 OpenTelemetry SDK 内部无法从公开接口读取的队列丢弃。所有计数都不能推断业务事件丢失。
 
 ## 定位顺序
 

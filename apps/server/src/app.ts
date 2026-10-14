@@ -54,6 +54,7 @@ export async function createApp(
     bodyLimit: 128 * 1024,
   });
   const tracing = new ServerTracing(database);
+  let traceUploadFailures = 0;
   const stream = await registerStream(
     app,
     database,
@@ -114,6 +115,7 @@ export async function createApp(
     memoryRssBytes: process.memoryUsage().rss,
     cpuUsageMicros: process.cpuUsage(),
     traceFailedExports: tracing.failedExports,
+    traceUploadFailures,
     subscribers: stream.subscriberCount,
     notificationMode: "android_foreground_service",
     metrics: database.metrics(),
@@ -178,7 +180,12 @@ export async function createApp(
           "validation_failed",
           "Trace timestamps are invalid",
         );
-      database.recordSpans(body.spans.map(safeTraceSpan));
+      try {
+        database.recordSpans(body.spans.map(safeTraceSpan));
+      } catch (cause) {
+        traceUploadFailures++;
+        throw cause;
+      }
       return { accepted: true, count: body.spans.length };
     },
   );

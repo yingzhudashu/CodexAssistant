@@ -7,7 +7,7 @@ const directory = mkdtempSync(join(tmpdir(), 'codex-electron-acceptance-'));
 app.setPath('userData', directory);
 const artifact = resolve('artifacts/acceptance');
 mkdirSync(artifact, { recursive: true });
-const report = { preload: false, settings: false, interaction: false, dark: false, trayIcon: false, sendAccepted: false, failureDraft: false, editDraft: false, stableDom: false, markdown: false, largeList: false, compact: false, errors: [] };
+const report = { preload: false, settings: false, interaction: false, dark: false, focusContrast: false, trayIcon: false, sendAccepted: false, failureDraft: false, editDraft: false, stableDom: false, markdown: false, largeList: false, compact: false, errors: [] };
 app.whenReady().then(async () => {
   const tasks = [{ id: 'synthetic-thread', title: '验收示例任务', status: 'needs_action', freshness: 'fresh', runtimeStatus: 'idle', activeFlags: [], plan: [], updatedAt: new Date().toISOString(), changedAt: new Date().toISOString() }];
   let requests = [{ type: 'interaction.request', protocolVersion: 'codex-assistant.v3', requestId: 'synthetic-input', threadId: tasks[0].id, kind: 'single_select', title: '请选择执行计划', questions: [{ id: 'plan', header: '执行计划', question: '选择下一步操作', required: true, multiple: false, isOther: true, options: [{ id: 'a', label: '继续实现' }, { id: 'b', label: '调整计划' }] }] }];
@@ -29,6 +29,23 @@ app.whenReady().then(async () => {
     await check('document.body.innerText.includes("颜色主题")'); report.settings = true;
     await win.webContents.executeJavaScript('document.querySelector("input[value=dark]").click()');
     await check('document.documentElement.dataset.theme === "dark"'); report.dark = true;
+    report.focusContrast = await win.webContents.executeJavaScript(`(() => {
+      const luminance = hex => {
+        const channels = hex.match(/[a-f0-9]{2}/gi).map(value => parseInt(value, 16) / 255);
+        const [r, g, b] = channels.map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const contrast = (a, b) => {
+        const x = luminance(a), y = luminance(b);
+        return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+      };
+      const root = getComputedStyle(document.documentElement);
+      const darkRing = root.getPropertyValue('--focus-ring').trim();
+      document.querySelector('input[value=light]').click();
+      const lightRing = getComputedStyle(document.documentElement).getPropertyValue('--focus-ring').trim();
+      document.querySelector('input[value=dark]').click();
+      return contrast(lightRing, '#f3f6fb') >= 3 && contrast(darkRing, '#111820') >= 3;
+    })()`);
     await painted();
     writeFileSync(join(artifact, 'windows-settings-dark.png'), (await win.webContents.capturePage()).toPNG());
     await win.webContents.executeJavaScript('document.querySelector("[data-page=tasks]").click(); document.querySelector("[data-task]").click()');

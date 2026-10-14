@@ -154,6 +154,8 @@ export class Monitor {
   #nextFlushAt = 0;
   #flushAttempt = 0;
   #traceBuffer: TraceSpan[] = [];
+  #traceBufferDropped = 0;
+  #reportedTraceDrops = 0;
   #traceUpload?: Promise<void>;
   #traceAbort?: AbortController;
   #controlSocket?: WebSocket;
@@ -1004,6 +1006,7 @@ export class Monitor {
         const { fingerprint: _fingerprint, ...wireEvent } = event;
         const uploadTrace = childTrace(event.trace);
         const startedAt = performance.now();
+        let phase: "request" | "response" | "receipt" = "request";
         try {
           const response = await fetch(
             `${this.#apiUrl}/codex-assistant/api/v3/events`,
@@ -1018,7 +1021,9 @@ export class Monitor {
               signal: AbortSignal.timeout(10_000),
             },
           );
+          phase = "response";
           if (!response.ok) throw new Error("UPLOAD_HTTP_FAILED");
+          phase = "receipt";
           const receipt = parseStrict<IngestResponse>(
             IngestResponseSchema,
             await response.json(),
@@ -1038,7 +1043,15 @@ export class Monitor {
         } catch (error) {
           this.#recordSpan(
             this.#span(uploadTrace, "desktop.upload.error", startedAt, {
-              error: "UPLOAD_FAILED",
+              phase,
+              error:
+                (error as Error)?.name === "TimeoutError"
+                  ? "UPLOAD_TIMEOUT"
+                  : phase === "response"
+                    ? "UPLOAD_HTTP_FAILED"
+                    : phase === "receipt"
+                      ? "INGEST_RECEIPT_INVALID"
+                      : "UPLOAD_FAILED",
             }),
           );
           this.#scheduleRetry();
@@ -1072,8 +1085,22 @@ export class Monitor {
     const safe = safeTraceSpan(span);
     this.#traceLogger.record(safe);
     this.#traceBuffer.push(safe);
-    if (this.#traceBuffer.length > 100)
+    if (this.#traceBuffer.length > 100) {
+      this.#traceBufferDropped += this.#traceBuffer.length - 100;
       this.#traceBuffer.splice(0, this.#traceBuffer.length - 100);
+    }
+    const dropped = this.#traceBufferDropped + this.#traceLogger.dropped;
+    if (dropped > this.#reportedTraceDrops) {
+      // 将本地有界队列的丢弃增量附在下一条可上传 span；不让诊断背压影响业务队列。
+      this.#traceBuffer[this.#traceBuffer.length - 1] = safeTraceSpan({
+        ...safe,
+        attributes: {
+          ...safe.attributes,
+          traceDropped: String(dropped - this.#reportedTraceDrops),
+        },
+      });
+      this.#reportedTraceDrops = dropped;
+    }
   }
 
   #startTraceUpload(): void {
@@ -1088,6 +1115,8 @@ export class Monitor {
   async #flushTraceBuffer(): Promise<void> {
     if (!this.#traceBuffer.length) return;
     const spans = this.#traceBuffer.slice(0, 100);
+    const trace = newTraceContext();
+    const startedAt = performance.now();
     try {
       const response = await fetch(
         `${this.#apiUrl}/codex-assistant/api/v3/traces/spans`,
@@ -1107,14 +1136,32 @@ export class Monitor {
           ]),
         },
       );
-      if (response.ok) {
-        const acknowledged = new Set(spans.map((span) => span.spanId));
-        this.#traceBuffer = this.#traceBuffer.filter(
-          (span) => !acknowledged.has(span.spanId),
+      if (!response.ok) {
+        this.#recordSpan(
+          this.#span(trace, "desktop.trace_upload.error", startedAt, {
+            phase: "response",
+            status: String(response.status),
+            error: "TRACE_HTTP_FAILED",
+          }),
         );
+        return;
       }
-    } catch {
+      const acknowledged = new Set(spans.map((span) => span.spanId));
+      this.#traceBuffer = this.#traceBuffer.filter(
+        (span) => !acknowledged.has(span.spanId),
+      );
+    } catch (error) {
       // Trace 是有界诊断缓存；上传失败不阻塞任务同步，也不保证永不丢失。
+      if (!this.#stopping)
+        this.#recordSpan(
+          this.#span(trace, "desktop.trace_upload.error", startedAt, {
+            phase: "request",
+            error:
+              (error as Error)?.name === "TimeoutError"
+                ? "TRACE_UPLOAD_TIMEOUT"
+                : "TRACE_UPLOAD_FAILED",
+          }),
+        );
     }
   }
 }

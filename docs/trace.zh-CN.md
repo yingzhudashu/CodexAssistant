@@ -18,11 +18,11 @@ Android通知增加 `android.sync.notification_post`（系统通知API调用耗�
 |服务端直接上传|每请求最多 100 span，同时受 128 KiB body 限制；存储失败返回错误供客户端保留队列|
 |桌面本地追加|等待队列 256，批量 64；溢出丢最旧诊断并计数；写入失败不抛给业务|
 |桌面文件|state/outbox.json.trace.jsonl 与 .1，各最多约 5 MiB；只轮转诊断，绝不删除 outbox|
-|桌面上传|内存 100；单独一个请求，5 秒 abort；按已确认 span ID 删除，停止时取消并等待|
+|桌面上传|内存 100；单独一个请求，5 秒 abort；按已确认 span ID 删除，停止时取消并等待；淘汰计数随后续桌面 span 上报|
 |Android|待发队列 100、父节点索引 100；500 ms 合并，单独 IO 上传，15 秒总期限；失败保留有限队列|
-|SQLite|按接收顺序保留最近 100000 条，启动及每 1000 次写入清理；清理间隔最多多 999 条|
+|SQLite|按接收顺序保留最近 100000 条，启动及每 1000 次写入清理；health 报告当前数量和本进程累计清理数量；清理间隔最多多 999 条|
 
-OTel exporter 失败累计到 health.traceFailedExports，不改变已提交业务事件的成功结果。队列满可丢诊断；该指标只计导出失败批次，不计 SDK 内部所有丢弃。查询 forceFlush 当前服务实例队列，但不能等待其他设备尚未上传的数据。SQLite 清理不主动 VACUUM，也不删除业务事件。
+OTel exporter 失败累计到 health.traceFailedExports；桌面后续可上传 span 的 traceDropped 属性报告本地待写日志和待上传缓冲自上次报告以来的丢弃数。桌面 Trace 上传错误使用 desktop.trace_upload.error，并以 phase 区分请求与响应阶段；业务事件的 desktop.upload.error 区分请求、HTTP 响应和回执校验阶段。诊断失败不改变已提交业务事件的成功结果。OpenTelemetry BatchSpanProcessor 不提供队列丢弃计数的公开 API，因此当前不宣称 health 能观测其内部队列丢弃；该队列仍有界，容量和导出失败单独披露。查询 forceFlush 当前服务实例队列，但不能等待其他设备尚未上传的数据。SQLite 清理不主动 VACUUM，也不删除业务事件；累计清理值从服务进程启动后计数，重启后归零。
 
 ## 诊断安全
 

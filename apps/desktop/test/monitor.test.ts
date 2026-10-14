@@ -179,3 +179,67 @@ it("uses the recorded upload span as the W3C HTTP parent within the poll trace",
     await rm(directory,{recursive:true,force:true});
   }
 });
+
+it("records trace upload response failures without failing the poll", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-trace-upload-failure-"));
+  mock.threads = [{ id: "trace-thread", updatedAt: "2026-09-08T06:00:00Z", status: { type: "idle" } }];
+  vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+    url.endsWith("/traces/spans")
+      ? { ok: false, status: 503 }
+      : { ok: true, status: 200, json: async () => ({ accepted: true, duplicate: false, sequence: 1 }) },
+  ));
+  let monitor: Monitor | undefined;
+  try {
+    monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://trace.invalid", token: "synthetic", deviceId: "trace-device", onTasks() {} });
+    await monitor.start();
+    await monitor.stop();
+    const spans = (await readFile(join(directory, "outbox.json.trace.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(spans).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "desktop.trace_upload.error",
+        attributes: expect.objectContaining({ phase: "response", status: "503", error: "TRACE_HTTP_FAILED" }),
+      }),
+    ]));
+  } finally {
+    await monitor?.stop();
+    mock.threads = undefined;
+    vi.unstubAllGlobals();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("polls 150 threads, uploads all business events in bounded batches, and reports trace evictions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-monitor-load-"));
+  mock.threads = Array.from({ length: 150 }, (_, index) => ({ id: `load-thread-${index}`, updatedAt: "2026-09-08T06:00:00Z", status: { type: "idle" } }));
+  let eventCount = 0;
+  let taskCount = 0;
+  const traceBatches: Array<Array<{ attributes?: Record<string, string> }>> = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith("/events")) {
+      eventCount++;
+      return { ok: true, status: 200, json: async () => ({ accepted: true, duplicate: false, sequence: eventCount }) };
+    }
+    if (url.endsWith("/traces/spans")) {
+      traceBatches.push((JSON.parse(String(init.body)) as { spans: typeof traceBatches[number] }).spans);
+    }
+    return { ok: true, status: 200, json: async () => ({ accepted: true }) };
+  }));
+  let monitor: Monitor | undefined;
+  try {
+    monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://trace.invalid", token: "synthetic", deviceId: "trace-device", onTasks(tasks) { taskCount = tasks.length; } });
+    await monitor.start();
+    const deadline = Date.now() + 5_000;
+    while ((eventCount < 150 || !traceBatches.flat().some(span => Number(span.attributes?.traceDropped) > 0)) && Date.now() < deadline)
+      await new Promise(resolve => setTimeout(resolve, 25));
+    await monitor.stop();
+    expect(taskCount).toBe(150);
+    expect(eventCount).toBe(150);
+    expect(traceBatches.every(batch => batch.length <= 100)).toBe(true);
+    expect(traceBatches.flat().some(span => Number(span.attributes?.traceDropped) > 0)).toBe(true);
+  } finally {
+    await monitor?.stop();
+    mock.threads = undefined;
+    vi.unstubAllGlobals();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 15_000);

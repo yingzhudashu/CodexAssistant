@@ -1,6 +1,6 @@
 # 隔离验收脚本
 
-本地命令在仓库根目录执行。合成测试使用临时 SQLite、占位 Token 和专用 emulator-5580；不连接生产、不操作其他手机。生产只读检查单独列在下方，不进入默认测试命令。原始报告统一写 artifacts/acceptance（网络脚本使用 artifacts/network-recovery），不提交历史过程文件。
+本地命令在仓库根目录执行。合成测试使用临时 SQLite、占位 Token 和专用 emulator-5580；不连接生产、不操作其他手机。生产只读检查单独列在下方，不进入默认测试命令。可再生报告写入 artifacts/acceptance（网络脚本使用 artifacts/network-recovery）；运行 npm run clean 会清理列明的报告和历史过程目录，但保留混有发行解包与私有交付材料的 artifacts 主验收目录。
 
 ## 自动质量检查
 
