@@ -18,7 +18,7 @@
     "check:privacy": "node scripts/check-privacy.mjs",
     "dev:server": "npm run dev --workspace=@codex-assistant/server",
     "dev:desktop": "npm run dev --workspace=@codex-assistant/desktop",
-    "perf:server": "node --import tsx scripts/perf-server.mjs",
+    "perf:server": "node --expose-gc --import tsx scripts/perf-server.mjs",
     "check:format": "prettier --check \"apps/*/src/**/*.{ts,cts,js,css,html}\" \"packages/*/src/**/*.ts\"",
     "format": "prettier --write \"apps/*/src/**/*.{ts,cts,js,css,html}\" \"packages/*/src/**/*.ts\"",
     "check:design": "node scripts/check-design-contract.mjs",

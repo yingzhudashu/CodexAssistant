@@ -32,9 +32,9 @@ python -m venv "$env:TEMP\codexassistant-acceptance-venv"
 node --import tsx scripts/acceptance/ui-server.ts
 ```
 
-另开终端安装Debug APK，执行 `adb -s emulator-5580 reverse tcp:33241 tcp:33241`，配置根地址 `http://127.0.0.1:33241` 与 Token `synthetic-acceptance-token`，进入“移动端验收任务”，运行虚拟环境Python的 `scripts/acceptance/android-smoke.py`。它提交合成多选/文本、读详情、发合成消息并验证草稿和主题；ui-server不调用真实Codex。
+另开终端安装Debug APK并执行 `adb -s emulator-5580 reverse tcp:33241 tcp:33241`，然后直接运行虚拟环境Python的 `scripts/acceptance/android-smoke.py`。脚本会在首次连接或已有配置下自动设置根地址 `http://127.0.0.1:33241` 和占位Token `synthetic-acceptance-token`，不需要手工编辑应用配置。它提交合成多选/文本、读详情、发合成消息并验证草稿和主题；ui-server不调用真实Codex。AVD若显示 System UI 无响应，只选择 Wait 并等待系统恢复；脚本不会自动关闭应用或忽略该对话框。
 
-停止ui-server后启动 `node --import tsx scripts/acceptance/network-recovery-server.ts`，打开应用再运行 `android-network-recovery.py`。脚本检查20次前后台新快照、3次断网恢复、服务端关闭恢复和writes不增长。恢复原先启用的网络接口，finally恢复测试前设置；没有连接Wi-Fi的AVD不能靠只启用Wi-Fi恢复蜂窝网络。
+停止ui-server后启动 `node --import tsx scripts/acceptance/network-recovery-server.ts`，保持应用已配置隔离地址并运行 `android-network-recovery.py`。脚本检查20次前后台新快照、3次断网恢复、服务端关闭恢复和writes不增长。恢复原先启用的网络接口，finally恢复测试前设置；没有连接Wi-Fi的AVD不能靠只启用Wi-Fi恢复蜂窝网络。
 
 `android-ui.py` 提供dump/tap/fill/screenshot/back，用可访问性树定位。测试后关闭本轮启动的模拟器和本地服务器。物理设备、OEM电池策略、读屏、真实锁屏声音仍需独立验收。
 

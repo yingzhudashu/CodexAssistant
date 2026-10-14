@@ -100,9 +100,16 @@ class SyncCoordinator(context: Context) {
     }
 
     private fun refreshNetwork(foreground: Boolean = false) {
-        val current = connectivity.activeNetwork
+        val current = currentNetwork()
         updateNetwork(current, foreground)
     }
+
+    /**
+     * activeNetwork 只代表系统选出的默认网络；在未通过外网探测、企业门户或本地回环 验收环境中，它可能暂时为空，但 allNetworks 仍会列出已经建立的链路。同步连接
+     * 的可用性应由 WebSocket 实际握手决定，不能把“未验证互联网”误判成“没有网络”。
+     */
+    private fun currentNetwork(): Network? =
+        currentOrConnectedNetwork(connectivity.activeNetwork, connectivity.allNetworks)
 
     private fun updateNetwork(next: Network?, foreground: Boolean = false) {
         val changed = network != next
@@ -165,7 +172,7 @@ class SyncCoordinator(context: Context) {
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
         }
-        network = connectivity.activeNetwork
+        network = currentNetwork()
         val initial =
             mutableState.value.copy(
                 cursor = credentials.cursor(),

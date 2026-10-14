@@ -126,18 +126,21 @@ export class TaskDatabase {
   }
 
   insert(input: IngestEvent): InsertResult {
-    const existing = this.#statement(
-      "SELECT sequence, device_id, local_sequence, occurred_at, trace_id, span_id, parent_span_id, snapshot FROM task_events WHERE device_id = ? AND local_sequence = ?",
-    ).get(input.deviceId, input.localSequence) as EventRow | undefined;
-    if (existing)
-      return {
-        duplicate: true,
-        event: this.#eventFromRow(existing),
-        shouldNotify: false,
-      };
-
     this.#database.exec("BEGIN IMMEDIATE");
     try {
+      // 重复检查必须与插入处于同一写事务；否则两个并发请求都可能通过检查，
+      // 一个请求会在唯一约束处失败，而客户端会把可安全重试的重复事件误判为错误。
+      const existing = this.#statement(
+        "SELECT sequence, device_id, local_sequence, occurred_at, trace_id, span_id, parent_span_id, snapshot FROM task_events WHERE device_id = ? AND local_sequence = ?",
+      ).get(input.deviceId, input.localSequence) as EventRow | undefined;
+      if (existing) {
+        this.#database.exec("COMMIT");
+        return {
+          duplicate: true,
+          event: this.#eventFromRow(existing),
+          shouldNotify: false,
+        };
+      }
       const now = new Date().toISOString();
       const snapshot = JSON.stringify(input.task);
       const previous = this.#statement(
@@ -274,7 +277,7 @@ export class TaskDatabase {
   traceSpans(traceId: string, limit = 1000): TraceSpan[] {
     const rows = this.#statement(
       `SELECT trace_id, span_id, parent_span_id, name, started_at, ended_at, attributes
-      FROM trace_spans WHERE trace_id = ? ORDER BY started_at ASC LIMIT ?`,
+      FROM trace_spans WHERE trace_id = ? ORDER BY rowid ASC LIMIT ?`,
     ).all(traceId, Math.max(1, Math.min(1000, Math.trunc(limit)))) as Array<{
       trace_id: string;
       span_id: string;
