@@ -312,7 +312,7 @@ class NetworkRecoveryTest {
         assertEquals("running", latest.tasks.single().status)
         assertEquals(
             "completed",
-            latest.taskChanges.getValue("notification-test").previous!!.status,
+            latest.taskChanges.getValue("notification-test").previousStatus,
         )
         val revision = latest.taskChanges.getValue("notification-test").revision
         repo.acknowledgeNotification("notification-test", revision)
@@ -324,7 +324,7 @@ class NetworkRecoveryTest {
         sockets.message(full("needs_action", 5))
         advanceTimeBy(200)
         runCurrent()
-        assertEquals("running", latest.taskChanges.getValue("notification-test").previous!!.status)
+        assertEquals("running", latest.taskChanges.getValue("notification-test").previousStatus)
         assertEquals("needs_action", latest.taskChanges.getValue("notification-test").task.status)
         repo.acknowledgeNotification(
             "notification-test",

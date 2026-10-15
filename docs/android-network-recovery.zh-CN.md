@@ -44,9 +44,11 @@ Coordinator 和 Repository 共享 TraceLogger；连接 trace 与业务事件 tra
 
 持续即时通知订阅使用specialUse前台服务，manifest声明自托管服务实时状态提醒的具体用途；删除原dataSync声明及超时处理，不把长期订阅当作一次有结束期限的数据传输。Android 14及以上传入SPECIAL_USE类型，较低API使用对应可用的startForeground重载。仍由用户打开应用启动，不通过后台循环、精确闹钟或自动重启链绕过系统限制。拒绝启动时显示后台同步不可用，可见Activity仍能拥有连接。
 
-设置→通知显示实际电池优化状态，由用户点击“允许后台持续连接”打开系统确认；返回后重新读取授权，取消不会伪造成功。未豁免时Doze可能暂停网络。通知权限与电池优化是不同授权，厂商自启动/后台限制也需单独设置。已收到事件的通知处理持有带10秒超时的短时PARTIAL_WAKE_LOCK，队列空闲及服务销毁时释放，不持有永久CPU锁，也不宣称该锁能解除Doze网络限制。
+设置→通知显示后台服务与实时连接状态、最近状态接收时间、任务通知/渠道是否可用、当前Doze状态及电池优化状态；返回系统设置后重新读取状态。未豁免时Doze可能暂停网络。通知权限与电池优化是不同授权，厂商自启动/后台限制也需单独设置。已收到事件的通知处理持有带10秒超时的短时PARTIAL_WAKE_LOCK，队列空闲及服务销毁时释放，不持有永久CPU锁，也不宣称该锁能解除Doze网络限制。
 
-系统通知提交后按任务及revision确认，旧确认不能删除新变化；配置代次不同的通知不会发送或确认。活动任务通知保留最近40个，为常驻和系统分组留余量，避免Android每应用通知数量上限阻止新提醒；任务数据和概览计数不受影响。进程内重连可比较断线前基线；进程被杀后没有完整任务磁盘缓存，首次快照不会把全部历史任务当成新提醒。
+系统通知 API 提交后按任务及revision确认，旧确认不能删除新变化；权限或任务提醒渠道关闭时保留未确认通知，不推进持久化基线，后续状态更新时重试。活动任务通知保留最近40个，为常驻和系统分组留余量，避免Android每应用通知数量上限阻止新提醒；任务数据和概览计数不受影响。
+
+通知比较基线跨进程保存在应用私有偏好中，最多1000条；仅保存任务ID的SHA-256、状态枚举与状态/当前步骤指纹的SHA-256，不保存任务标题、步骤正文或任务快照。第一次配置后的首个快照只建立静默基线，避免首次连接批量通知；进程重启后用已确认基线比较当前快照，补发未确认的最终状态。提交通知 API 后才推进该任务基线，因此进程在通知前退出时可在下次连接重试；极端情况下通知已提交但确认尚未持久化会重复提醒，按至少一次补发处理。
 
 设计依据：[Android Doze与豁免说明](https://developer.android.google.cn/training/monitoring-device-state/doze-standby?hl=en)、[Android 15服务类型源码](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/core/java/android/content/pm/ServiceInfo.java)、[系统通知限速与数量限制](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/services/core/java/com/android/server/notification/NotificationManagerService.java)。持续连接与明确用途的前台通知服务参考[ntfy Android实现](https://github.com/binwiederhier/ntfy-android/blob/main/app/src/main/java/io/heckel/ntfy/service/SubscriberService.kt)，不照搬自动重启链。
 
@@ -54,6 +56,6 @@ Coordinator 和 Repository 共享 TraceLogger；连接 trace 与业务事件 tra
 
 自动回归覆盖唯一连接、期限、永久错误、网络切换、旧回调、刷新、通知投影、150 条突发回执的慢消费者。隔离模拟器脚本覆盖 20 次前后台、3 次断网恢复、一次服务端主动关闭，核对 active=1、快照增长、writes 不增长。
 
-通知回归覆盖StateFlow合并、首次快照静默、实时新任务、重连最终快照补报、旧revision确认、配置切换、1000项边界、连续流量不饿死发送及任务/概览共享速率。`android-notifications.py`检查实际系统通知记录、后台延迟、重连补报、40次突发事件、授予豁免后的强制休眠及CPU锁释放；结束后恢复模拟器休眠/电池设置。
+通知回归覆盖StateFlow合并、首次快照静默、实时新任务、重连最终快照补报、进程重启后的脱敏基线恢复、通知不可用时保留待发变化、旧revision确认、配置切换、1000项边界、连续流量不饿死发送及任务/概览共享速率。`android-notifications.py`检查实际系统通知记录、后台延迟、重连补报、40次突发事件、授予豁免后的强制休眠及CPU锁释放；结束后恢复模拟器休眠/电池设置。
 
 正常可控网络回前台到可用状态目标 ≤5 秒，网络恢复信号后立即拨号；这是验收目标，不是任意移动网络 SLA。实际本轮结果见[验收记录](acceptance.zh-CN.md)。物理手机、厂商电池策略、真实 Doze/锁屏声音、移动网络和系统长时间冻结须另测，不能用模拟器结果代替。

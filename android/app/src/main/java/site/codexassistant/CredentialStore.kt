@@ -11,6 +11,8 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 
 class CredentialStore(context: Context) {
     val applicationContext: Context = context.applicationContext
@@ -81,6 +83,7 @@ class CredentialStore(context: Context) {
                 .putString("apiUrl", normalized)
                 .putString("token", Base64.encodeToString(encrypted, Base64.NO_WRAP))
                 .remove("cursor")
+                .remove("notificationBaseline")
                 .commit()
         ) {
             "安全存储失败，连接未保存"
@@ -96,6 +99,21 @@ class CredentialStore(context: Context) {
 
     fun saveCursor(value: Long) {
         preferences.edit().putLong("cursor", value).apply()
+    }
+
+    internal fun notificationBaseline(): NotificationBaseline? =
+        preferences.getString("notificationBaseline", null)?.let { value ->
+            runCatching { wireJson.decodeFromString<NotificationBaseline>(value) }.getOrNull()
+        }
+
+    internal fun saveNotificationBaseline(baseline: NotificationBaseline) {
+        preferences
+            .edit()
+            .putString(
+                "notificationBaseline",
+                wireJson.encodeToString(baseline.copy(tasks = baseline.tasks.takeLast(1000))),
+            )
+            .apply()
     }
 
     fun clear() {

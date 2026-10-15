@@ -2,6 +2,8 @@ package site.codexassistant
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.*
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -25,7 +27,7 @@ class TaskNotificationsTest {
         tracker.snapshot(listOf(task()), "initial", 0)
         assertTrue(tracker.changes.isEmpty())
         tracker.event(task("new"), "live", 1)
-        assertNull(tracker.changes.getValue("new").previous)
+        assertNull(tracker.changes.getValue("new").previousStatus)
         assertEquals("live", tracker.changes.getValue("new").traceId)
     }
 
@@ -37,7 +39,7 @@ class TaskNotificationsTest {
         tracker.event(task(), "b", 2)
         tracker.acknowledge("task", first.revision)
         val latest = tracker.changes.getValue("task")
-        assertEquals("completed", latest.previous!!.status)
+        assertEquals("completed", latest.previousStatus)
         assertEquals("running", latest.task.status)
         assertEquals("b", latest.traceId)
         tracker.acknowledge("task", latest.revision)
@@ -49,11 +51,44 @@ class TaskNotificationsTest {
         val tracker = TaskChangeTracker(TaskState(tasks = listOf(task())))
         tracker.snapshot(listOf(task(status = "needs_action")), "reconnect", 200)
         val change = tracker.changes.getValue("task")
-        assertEquals("running", change.previous!!.status)
+        assertEquals("running", change.previousStatus)
         assertEquals("needs_action", change.task.status)
         tracker.acknowledge("task", change.revision)
         tracker.snapshot(listOf(task(status = "needs_action")), "again", 300)
         assertTrue(tracker.changes.isEmpty())
+    }
+
+    @Test
+    fun persistedRedactedBaselineRecoversChangesAfterProcessRestart() {
+        var stored: NotificationBaseline? = null
+        val firstProcess = TaskChangeTracker(TaskState(), persist = { stored = it })
+        firstProcess.snapshot(listOf(task()), "initial", 0)
+        assertTrue(firstProcess.changes.isEmpty())
+        val encoded = wireJson.encodeToString(stored!!)
+        assertFalse(encoded.contains("验收任务"))
+
+        val restored = wireJson.decodeFromString<NotificationBaseline>(encoded)
+        val secondProcess = TaskChangeTracker(TaskState(), restored, persist = { stored = it })
+        secondProcess.snapshot(listOf(task(status = "completed")), "after-restart", 100)
+        val change = secondProcess.changes.getValue("task")
+        assertEquals("running", change.previousStatus)
+        assertEquals("completed", change.task.status)
+
+        secondProcess.acknowledge("task", change.revision)
+        val thirdProcess = TaskChangeTracker(TaskState(), stored)
+        thirdProcess.snapshot(listOf(task(status = "completed")), "same-state", 200)
+        assertTrue(thirdProcess.changes.isEmpty())
+    }
+
+    @Test
+    fun initializedEmptyBaselineStillNotifiesNewTaskAfterProcessRestart() {
+        var stored: NotificationBaseline? = null
+        TaskChangeTracker(TaskState(), persist = { stored = it }).snapshot(emptyList(), "empty", 0)
+        assertTrue(stored!!.initialized)
+
+        val restored = TaskChangeTracker(TaskState(), stored)
+        restored.snapshot(listOf(task()), "new-task", 100)
+        assertNull(restored.changes.getValue("task").previousStatus)
     }
 
     @Test
@@ -73,7 +108,10 @@ class TaskNotificationsTest {
         val delivery =
             NotificationDelivery(
                 backgroundScope,
-                postTask = { posted += testScheduler.currentTime to it.task.status },
+                postTask = {
+                    posted += testScheduler.currentTime to it.task.status
+                    true
+                },
                 postSummary = { summaries += it },
             )
         val tracker = TaskChangeTracker(TaskState(tasks = listOf(task())))
@@ -111,6 +149,7 @@ class TaskNotificationsTest {
                 postTask = {
                     times += testScheduler.currentTime
                     ids += it.task.id
+                    true
                 },
                 postSummary = { times += testScheduler.currentTime },
             )
@@ -136,7 +175,15 @@ class TaskNotificationsTest {
         val ids = mutableListOf<String>()
         var resets = 0
         val delivery =
-            NotificationDelivery(backgroundScope, { ids += it.task.id }, {}, { resets++ })
+            NotificationDelivery(
+                backgroundScope,
+                {
+                    ids += it.task.id
+                    true
+                },
+                {},
+                { resets++ },
+            )
         val tasks = listOf(task("old-1"), task("old-2"))
         delivery.update(
             TaskState(
@@ -150,5 +197,32 @@ class TaskNotificationsTest {
         runCurrent()
         assertEquals(listOf("old-1"), ids)
         assertEquals(1, resets)
+    }
+
+    @Test
+    fun blockedTaskNotificationRemainsQueuedUntilPostingIsAllowed() = runTest {
+        var allowed = false
+        var attempts = 0
+        val delivery =
+            NotificationDelivery(
+                backgroundScope,
+                postTask = {
+                    attempts++
+                    allowed
+                },
+                postSummary = {},
+            )
+        val task = task()
+        val change = TaskChange(1, "running", task.copy(status = "completed"), "trace", 0)
+        val state = TaskState(taskChanges = mapOf(task.id to change))
+
+        delivery.update(state)
+        runCurrent()
+        assertEquals(1, attempts)
+
+        allowed = true
+        delivery.update(state)
+        runCurrent()
+        assertEquals(2, attempts)
     }
 }

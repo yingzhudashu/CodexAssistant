@@ -56,13 +56,15 @@ class SyncForegroundService : Service() {
                 scope,
                 postTask = postTask@{ change ->
                         if (change.connectionEpoch != coordinator.state().value.connectionEpoch)
-                            return@postTask
-                        coordinator.traceLogger.span(
-                            "android.sync.notification_post",
-                            change.traceId,
-                        ) {
-                            notifyChange(change.previous, change.task)
-                        }
+                            return@postTask false
+                        val posted =
+                            coordinator.traceLogger.span(
+                                "android.sync.notification_post",
+                                change.traceId,
+                            ) {
+                                notifyChange(change.previousStatus, change.task)
+                            }
+                        if (!posted) return@postTask false
                         coordinator.traceLogger.timing(
                             "android.sync.notification_delivery",
                             change.traceId,
@@ -75,6 +77,7 @@ class SyncForegroundService : Service() {
                             change.task.id,
                             change.revision,
                         )
+                        true
                     },
                 postSummary = { updateNotification(it.text) },
                 reset = {
@@ -180,8 +183,16 @@ class SyncForegroundService : Service() {
             .notify(NOTIFICATION_ID, baseNotification(text))
     }
 
-    private fun notifyChange(previousTask: TaskSnapshot?, task: TaskSnapshot) {
-        val notice = notices.change(previousTask, task, android.os.SystemClock.elapsedRealtime())
+    private fun notifyChange(previousStatus: String?, task: TaskSnapshot): Boolean {
+        val manager = getSystemService(NotificationManager::class.java)
+        if (
+            !androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled() ||
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    manager.getNotificationChannel(EVENT_CHANNEL_ID)?.importance ==
+                        NotificationManager.IMPORTANCE_NONE
+        )
+            return false
+        val notice = notices.change(previousStatus, task, android.os.SystemClock.elapsedRealtime())
         val intent = Intent(this, MainActivity::class.java)
         val pending =
             PendingIntent.getActivity(
@@ -211,7 +222,6 @@ class SyncForegroundService : Service() {
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .build()
         // tag 使用完整任务 ID，避免 hashCode 碰撞或覆盖常驻通知。
-        val manager = getSystemService(NotificationManager::class.java)
         // Android限制每个应用的活动通知总量。为常驻和系统分组留余量，保留最近40个任务。
         // 超额时移除最旧提醒，业务任务仍完整保存在列表中，不能让系统拒绝最新提醒。
         if (task.id !in postedTaskIds)
@@ -220,15 +230,20 @@ class SyncForegroundService : Service() {
                 manager.cancel(oldest, 0)
                 postedTaskIds.remove(oldest)
             }
-        manager.notify(task.id, 0, notification)
+        try {
+            manager.notify(task.id, 0, notification)
+        } catch (_: SecurityException) {
+            return false
+        }
         postedTaskIds.remove(task.id)
         postedTaskIds.add(task.id)
         notices.retain(postedTaskIds)
+        return true
     }
 
     companion object {
         private const val SYNC_CHANNEL_ID = "codex-sync"
-        private const val EVENT_CHANNEL_ID = "codex-task-events"
+        internal const val EVENT_CHANNEL_ID = "codex-task-events"
         private const val NOTIFICATION_ID = 1001
     }
 }

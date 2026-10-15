@@ -59,6 +59,8 @@ internal constructor(
             .build(),
     private val traceLogger: TraceLogger = TraceLogger(),
     private val sockets: WebSocket.Factory = client,
+    private val notificationBaseline: NotificationBaseline? = null,
+    private val saveNotificationBaseline: (NotificationBaseline) -> Unit = {},
 ) {
     constructor(
         credentials: CredentialStore,
@@ -70,6 +72,8 @@ internal constructor(
         credentials::saveCursor,
         initial,
         traceLogger = traceLogger,
+        notificationBaseline = credentials.notificationBaseline(),
+        saveNotificationBaseline = credentials::saveNotificationBaseline,
     )
 
     private val lock = Any()
@@ -160,7 +164,8 @@ internal constructor(
 
     fun stream(): Flow<TaskState> = callbackFlow {
         var state = initialState.copy(connected = false, details = emptyMap(), results = emptyMap())
-        val taskChanges = TaskChangeTracker(initialState)
+        val taskChanges =
+            TaskChangeTracker(initialState, notificationBaseline, saveNotificationBaseline)
         var socket: WebSocket? = null
         var generation = 0L
         var retryAttempt = 0

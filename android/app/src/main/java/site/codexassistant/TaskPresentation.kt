@@ -44,15 +44,15 @@ class TaskNotices {
         lastAlertAt.keys.retainAll(ids)
     }
 
-    fun change(previous: TaskSnapshot?, next: TaskSnapshot, now: Long): TaskNotice {
+    fun change(previousStatus: String?, next: TaskSnapshot, now: Long): TaskNotice {
         val alerts = lastAlertAt.getOrPut(next.id) { mutableMapOf() }
-        val important = next.status != "running" && previous?.status != next.status
+        val important = next.status != "running" && previousStatus != next.status
         val last = if (important) alerts[next.status] else alerts.values.maxOrNull()
         val silent = last != null && now - last < 10_000L
         if (!silent) alerts[next.status] = now
         val transition =
-            if (previous == null) "新任务 · ${statusLabel(next.status)}"
-            else "${statusLabel(previous.status)} → ${statusLabel(next.status)}"
+            if (previousStatus == null) "新任务 · ${statusLabel(next.status)}"
+            else "${statusLabel(previousStatus)} → ${statusLabel(next.status)}"
         val step = next.plan.find { it.id == next.currentStepId }?.title
         return TaskNotice(
             "${statusLabel(next.status)} · ${next.title}",
