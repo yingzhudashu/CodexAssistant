@@ -2,9 +2,10 @@
 import os, pathlib, re, subprocess, sys, xml.etree.ElementTree as ET
 
 ADB = str(pathlib.Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/platform-tools/adb.exe')
+SERIAL = os.environ.get('ANDROID_SERIAL', 'emulator-5580')
 ARTIFACT = pathlib.Path(__file__).resolve().parents[2] / 'artifacts/acceptance'
 def adb(*args):
-    return subprocess.check_output([ADB, '-s', 'emulator-5580', *args], timeout=25)
+    return subprocess.check_output([ADB, '-s', SERIAL, *args], timeout=25)
 def tree():
     adb('shell', 'uiautomator', 'dump', '/sdcard/acceptance.xml')
     return ET.fromstring(adb('shell', 'cat', '/sdcard/acceptance.xml'))

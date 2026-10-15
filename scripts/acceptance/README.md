@@ -24,7 +24,7 @@ Electron真实renderer使用合成IPC验证，不向真实Desktop写消息。持
 
 ## Android模拟器
 
-先构建Debug APK。启动独立AVD并确认序列号emulator-5580；所有ADB命令必须带 `-s emulator-5580`。端口33241供ui-server、network-recovery-server、official-android互斥使用。
+先构建Debug APK。启动独立AVD并设置`ANDROID_SERIAL`为本次设备序列号；所有ADB命令必须带该序列号。默认为历史专用设备`emulator-5580`。端口33241供ui-server、network-recovery-server、official-android互斥使用。
 
 ```powershell
 python -m venv "$env:TEMP\codexassistant-acceptance-venv"
@@ -32,7 +32,7 @@ python -m venv "$env:TEMP\codexassistant-acceptance-venv"
 node --import tsx scripts/acceptance/ui-server.ts
 ```
 
-另开终端安装Debug APK并执行 `adb -s emulator-5580 reverse tcp:33241 tcp:33241`，然后直接运行虚拟环境Python的 `scripts/acceptance/android-smoke.py`。脚本会在首次连接或已有配置下自动设置根地址 `http://127.0.0.1:33241` 和占位Token `synthetic-acceptance-token`，不需要手工编辑应用配置。它提交合成多选/文本、读详情、发合成消息并验证草稿和主题；ui-server不调用真实Codex。AVD若显示 System UI 无响应，只选择 Wait 并等待系统恢复；脚本不会自动关闭应用或忽略该对话框。
+另开终端安装Debug APK并执行 `adb -s $env:ANDROID_SERIAL reverse tcp:33241 tcp:33241`，然后直接运行虚拟环境Python的 `scripts/acceptance/android-smoke.py`。脚本会在首次连接或已有配置下填写根地址 `http://127.0.0.1:33241` 和占位Token `synthetic-acceptance-token`，保存后继续验收。它提交合成多选/文本、读详情、发合成消息并验证草稿和主题；ui-server不调用真实Codex。首次安装出现通知权限提示时，先在专用AVD内选择允许或拒绝，再运行脚本。AVD若显示 System UI 无响应，只选择 Wait 并等待系统恢复；脚本不会自动关闭应用或忽略该对话框。
 
 停止ui-server后启动 `node --import tsx scripts/acceptance/network-recovery-server.ts`，保持应用已配置隔离地址并运行 `android-network-recovery.py`。脚本检查20次前后台新快照、3次断网恢复、服务端关闭恢复和writes不增长。恢复原先启用的网络接口，finally恢复测试前设置；没有连接Wi-Fi的AVD不能靠只启用Wi-Fi恢复蜂窝网络。
 

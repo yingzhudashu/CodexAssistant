@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference = 'Stop'
 # 真实部署坐标由操作者显式传入，不在源码中保存私人主机或域名。
 if ($NginxConfig.Split('/') -contains '..') { throw 'Nginx config must not contain parent traversal.' }
+$sshConfig = Join-Path $env:USERPROFILE '.ssh/config'
+if (-not (Test-Path -LiteralPath $sshConfig)) { throw 'The configured SSH config file is missing.' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Push-Location $root
 try {
@@ -31,11 +33,11 @@ try {
         if ($LASTEXITCODE) { throw 'Unable to create the server release archive.' }
         $sha256 = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
         $remoteTmp = "/tmp/codex-assistant-$release"
-        scp -- $archive "${Server}:$remoteTmp.tar.gz"
+        scp -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes -- $archive "${Server}:$remoteTmp.tar.gz"
         if ($LASTEXITCODE) { throw 'Unable to upload the server archive.' }
-        scp -- (Join-Path $root 'deploy/codex-assistant.service') "${Server}:$remoteTmp.service"
+        scp -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes -- (Join-Path $root 'deploy/codex-assistant.service') "${Server}:$remoteTmp.service"
         if ($LASTEXITCODE) { throw 'Unable to upload the service unit.' }
-        scp -- (Join-Path $root 'deploy/nginx-codex-assistant.locations.conf') "${Server}:$remoteTmp.nginx"
+        scp -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes -- (Join-Path $root 'deploy/nginx-codex-assistant.locations.conf') "${Server}:$remoteTmp.nginx"
         if ($LASTEXITCODE) { throw 'Unable to upload CodexAssistant release files.' }
         $remote = @'
 set -euo pipefail
@@ -60,6 +62,26 @@ sudo install -d -m 0700 "$backup"
 for config in /etc/systemd/system/codex-assistant.service /etc/nginx/snippets/codex-assistant.locations.conf "$nginx_config"; do
   if sudo test -f "$config"; then sudo cp -a "$config" "$backup/$(basename "$config")"; fi
 done
+if sudo test -f "$state/codex-assistant.sqlite"; then
+  sudo install -d -m 0700 "$backup/predeploy-raw"
+  for name in codex-assistant.sqlite codex-assistant.sqlite-wal codex-assistant.sqlite-shm; do
+    if sudo test -f "$state/$name"; then sudo cp -a "$state/$name" "$backup/predeploy-raw/$name"; fi
+  done
+  sudo python3 - "$state/codex-assistant.sqlite" "$backup/codex-assistant-predeploy.sqlite" <<'PY'
+import os, sqlite3, sys
+source, destination = sys.argv[1:]
+with sqlite3.connect('file:' + source + '?mode=ro', uri=True) as original:
+    with sqlite3.connect(destination) as snapshot:
+        original.backup(snapshot)
+        integrity = snapshot.execute('PRAGMA integrity_check').fetchone()[0]
+        assert integrity == 'ok', integrity
+        schema = snapshot.execute('PRAGMA user_version').fetchone()[0]
+        counts = [snapshot.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0]
+                  for table in ('tasks', 'task_events', 'trace_spans')]
+os.chmod(destination, 0o600)
+print('Predeploy SQLite snapshot: integrity=ok schema=%d tasks=%d events=%d spans=%d' % (schema, *counts))
+PY
+fi
 rollback() {
   status=$?
   trap - EXIT
@@ -159,14 +181,13 @@ done
 curl -fsS http://127.0.0.1:3240/codex-assistant/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["protocolVersion"] == "codex-assistant.v3"'
 sudo systemctl reload nginx
 curl -fsS '__PUBLIC_ORIGIN__/codex-assistant/health' | python3 -c 'import json,sys; assert json.load(sys.stdin)["protocolVersion"] == "codex-assistant.v3"'
-mapfile -t releases < <(sudo find "$app/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | awk '{print $2}')
-for old in "${releases[@]:5}"; do sudo rm -rf -- "$old"; done
+# Keep every prior immutable release available for rollback; clean these only through a separately reviewed operation.
 sudo rm -f "$archive" "$unit" "$snippet"
 echo "CodexAssistant production release active: $release"
 echo "RecoveryBackup=$backup"
 '@
         $remote = $remote.Replace('__RELEASE__', $release).Replace('__SHA256__', $sha256).Replace('__TMP__', $remoteTmp).Replace('__PUBLIC_ORIGIN__', $PublicOrigin).Replace('__NGINX_CONFIG__', $NginxConfig)
-        $remote | ssh -o BatchMode=yes $Server "tr -d '\r' | bash -s"
+        $remote | ssh -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes $Server "tr -d '\r' | bash -s"
         if ($LASTEXITCODE) { throw 'CodexAssistant production deployment failed.' }
         Write-Output "ProductionRelease=$release`nArchiveSha256=$sha256"
     } finally {

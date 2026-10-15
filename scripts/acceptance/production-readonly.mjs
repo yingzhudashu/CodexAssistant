@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 
 // 在生产服务器执行：凭据仅留在本进程，不输出任务正文、标识或 Token。
 // 仅发起健康检查、读取任务、订阅快照和查询 Trace，不写业务事件或发送消息。
 // 必须显式指定目标；默认地址可能让验收误连到维护者的私人服务。
 const origin = process.argv[2];
 assert(origin && /^https:\/\/[a-zA-Z0-9.-]+(?::[0-9]{1,5})?$/.test(origin), 'Usage: node production-readonly.mjs https://server.example.com');
-const require = createRequire('/opt/codex-assistant/current/apps/server/package.json');
-const WebSocket = require('ws');
 const environment = readFileSync('/etc/codex-assistant/codex-assistant.env', 'utf8');
 const token = environment.match(/^CODEX_ASSISTANT_ACCESS_TOKEN=(.+)$/m)?.[1].trim();
 assert(token && token.length >= 16, 'Production credential is missing');
@@ -35,20 +32,20 @@ assert(tasks.cursor >= before.metrics.cursor);
 
 const snapshot = await new Promise((resolve, reject) => {
     const socket = new WebSocket(`${base.replace('https:', 'wss:')}/api/v3/stream`);
-    const timeout = setTimeout(() => { socket.terminate(); reject(new Error('PRODUCTION_SNAPSHOT_TIMEOUT')); }, 15_000);
+    const timeout = setTimeout(() => { socket.close(); reject(new Error('PRODUCTION_SNAPSHOT_TIMEOUT')); }, 15_000);
     let received;
-    socket.on('open', () => socket.send(JSON.stringify({ type: 'auth', protocolVersion, token })));
-    socket.on('message', raw => {
+    socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'auth', protocolVersion, token })));
+    socket.addEventListener('message', event => {
         try {
-            const message = JSON.parse(raw.toString());
+            const message = JSON.parse(String(event.data));
             assert.equal(message.protocolVersion, protocolVersion);
             if (message.type === 'authenticated') socket.send(JSON.stringify({ type: 'subscribe', protocolVersion, after: 0 }));
             if (message.type === 'error') throw new Error('PRODUCTION_SUBSCRIPTION_REJECTED');
             if (message.type === 'snapshot') { received = message; socket.close(1000); }
-        } catch (error) { socket.terminate(); reject(error); }
+        } catch (error) { socket.close(); reject(error); }
     });
-    socket.on('error', () => { clearTimeout(timeout); reject(new Error('PRODUCTION_WEBSOCKET_FAILED')); });
-    socket.on('close', () => { clearTimeout(timeout); received ? resolve(received) : reject(new Error('PRODUCTION_SNAPSHOT_MISSING')); });
+    socket.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('PRODUCTION_WEBSOCKET_FAILED')); });
+    socket.addEventListener('close', () => { clearTimeout(timeout); received ? resolve(received) : reject(new Error('PRODUCTION_SNAPSHOT_MISSING')); });
 });
 assert.equal(snapshot.tasks.length, tasks.tasks.length);
 assert(snapshot.cursor >= tasks.cursor);

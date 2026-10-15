@@ -11,6 +11,8 @@ if ([string]::IsNullOrWhiteSpace($version)) { throw 'Desktop package version is 
 $outputPath = (Resolve-Path (New-Item -ItemType Directory -Force -Path $Output)).Path
 Push-Location $root
 try {
+    npm run build --workspace=@codex-assistant/protocol
+    if ($LASTEXITCODE) { throw 'Protocol package build failed.' }
     npm run package:win --workspace=@codex-assistant/desktop -- --config.electronDist=../../node_modules/electron/dist
     if ($LASTEXITCODE) { throw 'Windows production installer build failed.' }
 } finally { Pop-Location }

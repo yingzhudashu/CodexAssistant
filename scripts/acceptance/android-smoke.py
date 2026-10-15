@@ -1,9 +1,10 @@
 """专用 emulator-5580 的合成界面验收；需先启动 ui-server.ts。"""
 import json, pathlib, time
+import os
 import uiautomator2 as u2
 out = pathlib.Path(__file__).resolve().parents[2] / 'artifacts/acceptance'
 out.mkdir(parents=True, exist_ok=True)
-d = u2.connect('emulator-5580')
+d = u2.connect(os.environ.get('ANDROID_SERIAL', 'emulator-5580'))
 report = {}
 
 def dismiss_system_dialog():

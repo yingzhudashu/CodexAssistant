@@ -5,6 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$sshConfig = Join-Path $env:USERPROFILE '.ssh/config'
+if (-not (Test-Path -LiteralPath $sshConfig)) { throw 'The configured SSH config file is missing.' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $windows = Get-Content -Raw -LiteralPath (Join-Path $root 'artifacts/windows/manifest.json') | ConvertFrom-Json
 $android = Get-Content -Raw -LiteralPath (Join-Path $root 'artifacts/android/manifest.json') | ConvertFrom-Json
@@ -40,15 +42,15 @@ $manifestPath = Join-Path $root 'artifacts/manifest.json'
 # 明确使用无 BOM UTF-8；联合清单是客户端更新的唯一提交点。
 [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8) + "`n", [Text.UTF8Encoding]::new($false))
 $remoteStage = '/tmp/codex-assistant-downloads-' + [guid]::NewGuid().ToString('N')
-ssh -o BatchMode=yes $Server "mkdir -m 700 '$remoteStage'"
+ssh -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes $Server "mkdir -m 700 '$remoteStage'"
 if ($LASTEXITCODE) { throw 'Unable to create upload directory.' }
 foreach ($platform in 'windows', 'android') {
     $artifact = if ($platform -eq 'windows') { $windows.installer } else { $android.apk }
     $path = Join-Path $root "artifacts/$platform/$($artifact.file)"
-    scp -- $path "${Server}:$remoteStage/$($downloads[$platform].file)"
+    scp -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes -- $path "${Server}:$remoteStage/$($downloads[$platform].file)"
     if ($LASTEXITCODE) { throw "Unable to upload $platform; upload directory retained: $remoteStage" }
 }
-scp -- $manifestPath "${Server}:$remoteStage/manifest.json"
+scp -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes -- $manifestPath "${Server}:$remoteStage/manifest.json"
 if ($LASTEXITCODE) { throw 'Unable to upload joint manifest.' }
 $remote = @'
 import hashlib, json, os, shutil, sys, urllib.request
@@ -117,7 +119,7 @@ for entry in manifest['downloads'].values():
 stage.rmdir()
 print('Client manifest published and verified')
 '@
-$remote | ssh -o BatchMode=yes $Server "sudo -n python3 - '$remoteStage' '$baseUrl'"
+$remote | ssh -F $sshConfig -o BatchMode=yes -o StrictHostKeyChecking=yes $Server "sudo -n python3 - '$remoteStage' '$baseUrl'"
 if ($LASTEXITCODE) { throw 'Client publication failed; inspect the upload directory and current manifest.' }
 $published = Invoke-WebRequest -Uri "$baseUrl/manifest.json" -TimeoutSec 30
 # 直接比较发布文本，避免不同 PowerShell 版本把 JSON 时间自动转成 DateTime。
