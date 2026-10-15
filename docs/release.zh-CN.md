@@ -1,17 +1,17 @@
 # 构建与发布
 
-发布状态：**已发布**。正式服务器客户端清单已发布 Windows `2.0.18`、Android `2.0.18`（`versionCode=21`）；GitHub公开Release仍为 `v2.0.17`。协议 `codex-assistant.v3`，SQLite schema=6。生产服务器和下载站点坐标仅保存在本机SSH配置及仓库外记录。
+发布状态：**已发布**。正式服务器客户端清单已发布 Windows `2.0.19`、Android `2.0.19`（`versionCode=22`）；GitHub公开Release仍为 `v2.0.17`。协议 `codex-assistant.v3`，SQLite schema=6。生产服务器和下载站点坐标仅保存在本机SSH配置及仓库外记录。
 
-GitHub通用发行版仍可在本仓库主页 **Releases → v2.0.17 → Assets** 获取；正式服务器清单提供 `CodexAssistant-2.0.18.exe` 与 `CodexAssistant-2.0.18.apk`，供配置该服务器的客户端应用内更新使用。源码压缩包不能代替安装包。大小、哈希及测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
+GitHub通用发行版仍可在本仓库主页 **Releases → v2.0.17 → Assets** 获取；正式服务器清单提供 `CodexAssistant-2.0.19.exe` 与 `CodexAssistant-2.0.19.apk`，供配置该服务器的客户端应用内更新使用。源码压缩包不能代替安装包。大小、哈希及测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
 
-服务器2.0.18基于当前源码重新构建，Windows x64安装器未签名，Android Release保留既有签名证书并递增versionCode至21。GitHub v2.0.17继续作为公开通用发行版；服务器清单与GitHub发行独立管理。
+服务器2.0.19基于包含最新客户端修复的源码重新构建，Windows x64安装器未签名，Android Release保留既有签名证书并递增versionCode至22。GitHub v2.0.17继续作为公开通用发行版；服务器清单与GitHub发行独立管理。此前的2.0.18文件保持不可变并继续保留。
 
 ## 客户端升级指引
 
 |组件|当前版本与操作|
 |---|---|
-|Windows|服务器清单提供2.0.18，应用标识为`site.codexassistant`。安装器未签名；升级前从托盘退出，并保留本地连接配置和outbox。真实覆盖安装未在本轮验证。|
-|Android|服务器清单提供2.0.18/code21，使用原Release签名；首次使用的服务地址为空，需自行填写。已保存的连接配置不会因默认值清空而删除。|
+|Windows|服务器清单提供2.0.19，应用标识为`site.codexassistant`。安装器未签名；升级前从托盘退出，并保留本地连接配置和outbox。真实覆盖安装未在本轮验证。|
+|Android|服务器清单提供2.0.19/code22，使用原Release签名；首次使用的服务地址为空，需自行填写。已保存的连接配置不会因默认值清空而删除。|
 |服务端|协议v3、schema6；生产release已部署，业务数据原位保留且未执行migration。|
 
 Windows在“关于与更新”、Android在设置页点击“检查更新”后，通过系统浏览器下载安装包，也可使用本页下载链接。应用不会静默安装更新。Windows升级前从托盘菜单“退出”停止工作站，安装后重新打开并检查连接和采集状态；仅关闭窗口会继续在托盘运行。Android安装后打开应用，确认连接成功，并在设置→通知核对系统通知权限、提醒渠道和电池优化状态；需要息屏及时接收时，点击“允许后台持续连接”并在系统界面确认。部分厂商还需设置自启动和后台运行权限，排查方式见[运维手册](operations.zh-CN.md#android-生命周期)。
@@ -76,6 +76,6 @@ Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错�
 
 `scripts/acceptance/production-readonly.mjs` 在目标服务器执行，读取既有环境凭据，检查公网鉴权、HTTP/WS 快照、Trace 父节点及订阅释放。只输出计数与布尔结果，不写业务事件、不发送消息、不打印任务正文或 Token；执行方式见[验收脚本说明](../scripts/acceptance/README.md#生产部署后只读检查)。
 
-安装包不提交Git源代码历史，服务器文件与版本清单独立发布；原始报告不公开。真实部署地址、SSH别名、站点配置文件名、release和备份标识、业务计数仅保存于仓库外。GitHub v2.0.17公开资产与服务器2.0.18清单分别管理，不互相覆盖。Windows安装器未签名且真实覆盖安装需单独验收。
+安装包不提交Git源代码历史，服务器文件与版本清单独立发布；原始报告不公开。真实部署地址、SSH别名、站点配置文件名、release和备份标识、业务计数仅保存于仓库外。GitHub v2.0.17公开资产与服务器2.0.19清单分别管理，不互相覆盖。Windows安装器未签名且真实覆盖安装需单独验收。
 
 需要保留最终交付物时先复制到工作区之外，再执行 `npm run clean -- -WhatIf` / `npm run clean`。
