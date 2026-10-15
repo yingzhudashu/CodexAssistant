@@ -180,6 +180,13 @@ export async function registerStream(
               "Only one workstation controller is supported",
             );
           desktopControllers.add(socket);
+          sendSocket(
+            socket,
+            JSON.stringify({
+              type: "desktop.ready",
+              protocolVersion: PROTOCOL_VERSION,
+            }),
+          );
           return;
         }
         if (desktopControllers.has(socket)) {

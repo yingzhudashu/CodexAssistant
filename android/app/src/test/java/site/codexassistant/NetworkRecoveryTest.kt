@@ -145,7 +145,19 @@ class NetworkRecoveryTest {
         runCurrent()
         assertTrue(states.last().connected)
         assertEquals(listOf(7L), cursors)
-        repo.sendMessage("task", "one")
+        val requestId = repo.sendMessage("task", "one")
+        val sentMessage =
+            sockets.connections.last().first.sent.last().let {
+                wireJson.decodeFromString<ClientSendMessage>(it)
+            }
+        assertEquals(requestId, sentMessage.requestId)
+        assertEquals("task", sentMessage.threadId)
+        assertEquals("one", sentMessage.text)
+        sockets.message(
+            """{"type":"result","protocolVersion":"codex-assistant.v3","requestId":"$requestId","threadId":"task","status":"failed","error":"工作站未连接"}"""
+        )
+        runCurrent()
+        assertEquals("工作站未连接", states.last().results[requestId]?.error)
         repo.recover(true, foreground = true)
         runCurrent()
         repeat(10) { repo.recover(true, foreground = true) }
@@ -231,6 +243,7 @@ class NetworkRecoveryTest {
         advanceTimeBy(200)
         runCurrent()
         assertTrue(states.last().connected)
+        assertNotNull(states.last().lastStateReceivedAtEpochMs)
         assertEquals(150, states.last().results.size)
         assertEquals("started", states.last().results["r-149"]?.status)
         repo.stop()

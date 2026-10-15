@@ -15,7 +15,10 @@ declare global {
       getSyncStatus(): Promise<
         "connecting" | "syncing" | "connected" | "offline"
       >;
-      getWorkstationStatus(): Promise<{ ready: boolean }>;
+      getWorkstationStatus(): Promise<{
+        ready: boolean;
+        desktopControlConnected: boolean;
+      }>;
       getTaskDetail(input: {
         threadId: string;
         cursor?: string;
@@ -40,6 +43,7 @@ declare global {
           status: "connecting" | "syncing" | "connected" | "offline",
         ) => void,
       ): () => void;
+      onMobileRelayStatus(listener: (connected: boolean) => void): () => void;
     };
   }
 }

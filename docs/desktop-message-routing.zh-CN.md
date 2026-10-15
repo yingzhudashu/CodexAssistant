@@ -18,6 +18,12 @@ tools/call 参数为 namespace、tool、arguments、callId、threadId、turnId�
 
 超时、断线或坏响应可能发生在消息已经写入之后，显示“结果尚未确认，请读取回合摘要核实。消息不会自动重发。”。立即丢弃旧连接，绝不重放该次写入；下一次用户主动发送重新发现。任何错误都不泄漏管道、内部路径、原始错误或正文。
 
+## 控制通道就绪与状态
+
+Desktop 完成 `auth`、`subscribe` 后发送 `role=desktop`。服务端只有在接受唯一工作站控制器登记时才返回 `desktop.ready`；收到该确认前，Windows 不把手机消息转发显示为可用。第二个控制端仍被拒绝。控制连接每15秒发送一次WebSocket心跳，10秒未收到Pong即关闭当前连接，按1–6秒退避重新认证、订阅和登记；重连期间不重放已经发出的消息。
+
+采集同步状态与手机消息控制通道状态独立展示。`workstation.status.ready` 只表示本机 app-server 已初始化，不能代替 `desktop.ready`。Android 只在收到与自身 `requestId`、`threadId` 匹配的 `result` 后结束发送等待；120秒无回执只显示结果未确认，保留草稿且不自动重发。
+
 ## 回执与界面
 
 当前协议为 codex-assistant.v3 / SQLite schema 6。result 字段固定 type、protocolVersion、requestId、threadId、status，可选 error；status 只有 started（Desktop 已接受）与 failed（未获得成功确认）。消息回执不含回复流、回合完成状态或正文。任务本身的 completed 和 latestTurn 不变，三端须同步升级，不提供兼容映射。

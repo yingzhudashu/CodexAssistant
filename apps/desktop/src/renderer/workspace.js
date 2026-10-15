@@ -11,7 +11,7 @@ const steps = {
   completed: "完成",
   failed: "失败",
 };
-const fresh = { fresh: "近期采集", stale: "上次同步", unavailable: "无法采集" };
+const fresh = { fresh: "近期数据", stale: "缓存数据", unavailable: "无法采集" };
 const turns = {
   inProgress: "进行中",
   completed: "回合完成",
@@ -24,6 +24,7 @@ const s = {
   connection: null,
   sync: "connecting",
   ready: false,
+  desktopControlConnected: false,
   loaded: false,
   page: "tasks",
   selected: null,
@@ -120,7 +121,7 @@ function list() {
             .map((t) => {
               const p = t.plan || [];
               const done = p.filter((x) => x.status === "completed").length;
-              return `<button class="task-card ${s.selected === t.id ? "selected" : ""}" data-task="${esc(t.id)}" aria-pressed="${s.selected === t.id}"><span class="card-top"><small>${esc(t.projectName || "Codex 工作站")}</small><span class="status ${esc(t.status)}">${labels[t.status] || esc(t.status)}</span></span><strong>${esc(t.title)}</strong>${p.length ? `<small>${done} / ${p.length} 步骤完成</small><progress max="${p.length}" value="${done}" aria-label="执行计划进度"></progress>` : ""}<small>${fresh[t.freshness] || "未提供"} · ${fmt(t.updatedAt)}</small></button>`;
+              return `<button class="task-card ${s.selected === t.id ? "selected" : ""}" data-task="${esc(t.id)}" aria-pressed="${s.selected === t.id}"><span class="card-top"><small>${esc(t.projectName || "Codex 工作站")}</small><span class="status ${esc(t.status)}">${labels[t.status] || esc(t.status)}</span></span><strong>${esc(t.title)}</strong>${p.length ? `<small>${done} / ${p.length} 步骤完成</small><progress max="${p.length}" value="${done}" aria-label="执行计划进度"></progress>` : ""}<small class="task-updated">任务更新于 ${fmt(t.updatedAt)}</small><small class="freshness ${esc(t.freshness)}"><i aria-hidden="true"></i>${fresh[t.freshness] || "未提供"}</small></button>`;
             })
             .join("")
         : `<div class="empty">${icon("tasks")}<h3>${!s.tasks.length && !s.lastSync ? "等待首次同步" : "暂无符合条件的任务"}</h3><p>任务采集后会显示在这里，可调整搜索与筛选条件。</p></div>`
@@ -159,7 +160,7 @@ const rich = (text) => window.renderRichText(text);
 function detail() {
   const t = s.tasks.find((t) => t.id === s.selected);
   if (!t) return "";
-  return `<section class="task-detail" data-screen="CA-04 CA-05 CA-06 CA-07"><div class="detail-heading"><button class="icon" data-close aria-label="返回任务列表">${icon("back")}</button><div><span class="eyebrow">任务详情</span><h2>${esc(t.title)}</h2></div></div><div class="detail-meta"><span class="status ${esc(t.status)}">${labels[t.status] || esc(t.status)}</span><small>${fresh[t.freshness]}</small></div><nav class="tabs" aria-label="任务详情分区">${[
+  return `<section class="task-detail" data-screen="CA-04 CA-05 CA-06 CA-07"><div class="detail-heading"><button class="icon" data-close aria-label="返回任务列表">${icon("back")}</button><div><span class="eyebrow">任务详情</span><h2>${esc(t.title)}</h2></div></div><div class="detail-meta"><span class="status ${esc(t.status)}">${labels[t.status] || esc(t.status)}</span><small class="freshness ${esc(t.freshness)}"><i aria-hidden="true"></i>${fresh[t.freshness] || "未提供"}</small></div><nav class="tabs" aria-label="任务详情分区">${[
     ["plan", "执行计划"],
     ["history", "回合摘要"],
     ["message", "发送消息"],
@@ -179,7 +180,7 @@ function content() {
   if (s.page === "tasks")
     return `<div class="tasks-workspace ${s.selected ? "with-detail" : ""}">${list()}${detail()}</div>`;
   if (s.page === "connection")
-    return `<section class="page-content" data-screen="CA-12">${card("连接状态", `<dl>${pair("同步状态", status())}${pair("服务地址", s.connection?.apiUrl)}${pair("上次采集", fmt(s.lastSync))}</dl><div class="actions"><button class="primary" data-refresh-state>重新读取状态</button><button data-edit>编辑连接</button></div>`)}${card("Windows 工作站", `<p>关闭窗口后继续在托盘运行。双击托盘图标恢复窗口，右键菜单选择“退出”停止采集。</p><details><summary>诊断详情</summary><p>设备 ${esc(s.connection?.deviceId || "未提供")}</p><p>协议 codex-assistant.v3</p></details>`)}</section>`;
+    return `<section class="page-content" data-screen="CA-12">${card("连接状态", `<dl>${pair("数据同步", status())}${pair("手机消息转发", s.desktopControlConnected ? "工作站控制通道已连接" : "工作站控制通道未连接")}${pair("服务地址", s.connection?.apiUrl)}${pair("最近采集", fmt(s.lastSync))}</dl><div class="actions"><button class="primary" data-refresh-state>重新读取状态</button><button data-edit>编辑连接</button></div>`)}${card("Windows 工作站", `<p>关闭窗口后继续在托盘运行。双击托盘图标恢复窗口，右键菜单选择“退出”停止采集。</p><details><summary>诊断详情</summary><p>设备 ${esc(s.connection?.deviceId || "未提供")}</p><p>协议 codex-assistant.v3</p></details>`)}</section>`;
   if (s.page === "appearance")
     return `<section class="page-content" data-screen="CA-09">${card(
       "外观",
@@ -489,7 +490,9 @@ function bind() {
   on("[data-refresh-state]", "click", async () => {
     try {
       s.sync = await window.codexAssistant.getSyncStatus();
-      s.ready = (await window.codexAssistant.getWorkstationStatus()).ready;
+      const workstation = await window.codexAssistant.getWorkstationStatus();
+      s.ready = workstation.ready;
+      s.desktopControlConnected = workstation.desktopControlConnected;
       s.notice = "已重新读取本机同步状态";
     } catch (e) {
       s.error = e.message;
@@ -570,7 +573,9 @@ async function boot() {
     s.tasks = await window.codexAssistant.getTasks();
     s.interactions = await window.codexAssistant.getInteractions();
     s.sync = await window.codexAssistant.getSyncStatus();
-    s.ready = (await window.codexAssistant.getWorkstationStatus()).ready;
+    const workstation = await window.codexAssistant.getWorkstationStatus();
+    s.ready = workstation.ready;
+    s.desktopControlConnected = workstation.desktopControlConnected;
     s.loaded = true;
     let taskSignature = JSON.stringify(s.tasks);
 
@@ -600,10 +605,12 @@ async function boot() {
         const signature = JSON.stringify(interactions);
         const changed =
           signature !== JSON.stringify(s.interactions) ||
-          s.ready !== workstation.ready;
+          s.ready !== workstation.ready ||
+          s.desktopControlConnected !== workstation.desktopControlConnected;
         s.interactions = interactions;
 
         s.ready = workstation.ready;
+        s.desktopControlConnected = workstation.desktopControlConnected;
         if (changed) render();
         else renderConnection();
       } catch {
@@ -612,6 +619,10 @@ async function boot() {
           render();
         }
       }
+    });
+    window.codexAssistant.onMobileRelayStatus((connected) => {
+      s.desktopControlConnected = connected;
+      if (s.page === "connection") render();
     });
   } catch (e) {
     s.error = e.message || "初始化失败";

@@ -22,6 +22,7 @@ let tray: Tray | undefined;
 let monitor: Monitor | undefined;
 let latestTasks: TaskSnapshot[] = [];
 let monitorStatus: MonitorStatus = "connecting";
+let desktopControlConnected = false;
 let quitting = false;
 let monitorGeneration = 0;
 let savingConnection = false;
@@ -126,6 +127,11 @@ async function startMonitor(): Promise<void> {
         monitorStatus = status;
         window?.webContents.send("sync.status", status);
       },
+      onControlStatus: (connected) => {
+        if (generation !== monitorGeneration || quitting) return;
+        desktopControlConnected = connected;
+        window?.webContents.send("mobile-relay.status", connected);
+      },
     });
     if (generation !== monitorGeneration || quitting) {
       await next.stop();
@@ -170,8 +176,10 @@ function registerIpc(): void {
       monitor = undefined;
       latestTasks = [];
       monitorStatus = "connecting";
+      desktopControlConnected = false;
       window?.webContents.send("tasks.updated", latestTasks);
       window?.webContents.send("sync.status", monitorStatus);
+      window?.webContents.send("mobile-relay.status", desktopControlConnected);
       // 保存只确认本地持久化；握手失败由状态展示，不能把已保存配置误报为保存失败。
       void startMonitor();
       return {
@@ -283,7 +291,10 @@ function registerIpc(): void {
   });
   ipcMain.handle("workstation.status", (event) => {
     assertTrustedSender(event);
-    return { ready: monitor?.workstationReady === true };
+    return {
+      ready: monitor?.workstationReady === true,
+      desktopControlConnected,
+    };
   });
 }
 const gotLock = app.requestSingleInstanceLock();

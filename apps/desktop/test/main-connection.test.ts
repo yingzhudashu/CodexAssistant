@@ -115,11 +115,16 @@ it("keeps a valid monitor on save failure, serializes saves, and ignores replace
   await vi.waitFor(() => expect(fixture.monitors).toHaveLength(2));
   expect(fixture.monitors[0].stop).toHaveBeenCalledOnce();
   fixture.monitors[1].options.onStatus("connected");
+  fixture.monitors[1].options.onControlStatus(true);
   fixture.monitors[0].options.onStatus("offline");
+  fixture.monitors[0].options.onControlStatus(false);
   fixture.monitors[0].failStart();
   await Promise.resolve();
   await Promise.resolve();
   expect(fixture.ipc.get("sync.status")!(event)).toBe("connected");
+  expect(fixture.ipc.get("workstation.status")!(event)).toMatchObject({
+    desktopControlConnected: true,
+  });
   expect(() =>
     fixture.ipc.get("tasks.get")!({
       ...event,

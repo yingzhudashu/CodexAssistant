@@ -26,7 +26,10 @@ async function fixture() {
     send({ type: 'auth', token: 'control-routing-test-token' });
     send({ type: 'subscribe', after: 0 });
     await vi.waitFor(() => expect(messages.some(m => m.type === 'snapshot')).toBe(true));
-    if (desktop) { send({ type: 'role', role: 'desktop' }); await new Promise(r => setTimeout(r, 20)); }
+    if (desktop) {
+      send({ type: 'role', role: 'desktop' });
+      await vi.waitFor(() => expect(messages).toContainEqual(expect.objectContaining({ type: 'desktop.ready', protocolVersion: PROTOCOL_VERSION })));
+    }
     return { socket, messages, send };
   }
   return { connect, server };

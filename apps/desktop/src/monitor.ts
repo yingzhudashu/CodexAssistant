@@ -148,6 +148,7 @@ export class Monitor {
   #pollFinished?: Promise<void>;
   #onTasks: (tasks: TaskSnapshot[]) => void;
   #onStatus: (status: MonitorStatus) => void;
+  #onControlStatus: (connected: boolean) => void;
   #lifecycle = new LifecycleReader();
   #threadCache = new Map<string, CachedTask>();
   #inProgressItems = new Map<string, boolean>();
@@ -160,6 +161,10 @@ export class Monitor {
   #traceAbort?: AbortController;
   #controlSocket?: WebSocket;
   #controlConnected = false;
+  #controlRetry?: NodeJS.Timeout;
+  #controlHeartbeat?: NodeJS.Timeout;
+  #controlMissedPong?: NodeJS.Timeout;
+  #controlRetryAttempt = 0;
   #sendRpcs = new Map<string, Promise<{ status: "started" }>>();
   #interactions = new Map<string, PendingInteraction>();
   #interactionResults = new Map<string, InteractionResult>();
@@ -173,6 +178,7 @@ export class Monitor {
     outbox: StoredOutbox;
     onTasks: (tasks: TaskSnapshot[]) => void;
     onStatus: (status: MonitorStatus) => void;
+    onControlStatus: (connected: boolean) => void;
     desktopHost?: DesktopHost;
   }) {
     this.#statePath = input.statePath;
@@ -182,6 +188,7 @@ export class Monitor {
     this.#outbox = input.outbox;
     this.#onTasks = input.onTasks;
     this.#onStatus = input.onStatus;
+    this.#onControlStatus = input.onControlStatus;
     this.#desktopHost = input.desktopHost ?? new CodexDesktopHost();
     this.#traceLogger = new TraceLogger(`${input.statePath}.trace.jsonl`);
     this.#server = new CodexAppServer({
@@ -209,6 +216,7 @@ export class Monitor {
     deviceId: string;
     onTasks: (tasks: TaskSnapshot[]) => void;
     onStatus?: (status: MonitorStatus) => void;
+    onControlStatus?: (connected: boolean) => void;
     desktopHost?: DesktopHost;
   }): Promise<Monitor> {
     const path = join(options.stateDirectory, "outbox.json");
@@ -268,6 +276,7 @@ export class Monitor {
       outbox,
       onTasks: options.onTasks,
       onStatus: options.onStatus ?? (() => undefined),
+      onControlStatus: options.onControlStatus ?? (() => undefined),
       desktopHost: options.desktopHost,
     });
   }
@@ -286,6 +295,12 @@ export class Monitor {
     this.#expireInteractions();
     if (this.#timer) clearInterval(this.#timer);
     this.#traceAbort?.abort();
+    if (this.#controlRetry) clearTimeout(this.#controlRetry);
+    if (this.#controlHeartbeat) clearInterval(this.#controlHeartbeat);
+    if (this.#controlMissedPong) clearTimeout(this.#controlMissedPong);
+    this.#controlRetry = undefined;
+    this.#controlHeartbeat = undefined;
+    this.#controlMissedPong = undefined;
     await this.#traceUpload;
     await this.#pollFinished;
     await Promise.allSettled([...this.#sendRpcs.values()]);
@@ -417,11 +432,16 @@ export class Monitor {
   }
 
   #connectControl(): void {
-    if (this.#controlSocket) return;
+    if (this.#stopping || this.#controlSocket) return;
+    if (this.#controlRetry) {
+      clearTimeout(this.#controlRetry);
+      this.#controlRetry = undefined;
+    }
     const url =
       this.#apiUrl.replace(/^http/, "ws") + "/codex-assistant/api/v3/stream";
     const socket = new WebSocket(url);
     this.#controlSocket = socket;
+    this.#onControlStatus(false);
     socket.on("open", () => {
       socket.send(
         JSON.stringify({
@@ -449,7 +469,29 @@ export class Monitor {
               role: "desktop",
             }),
           );
+          this.#controlHeartbeat = setInterval(() => {
+            if (
+              socket !== this.#controlSocket ||
+              socket.readyState !== WebSocket.OPEN
+            )
+              return;
+            if (this.#controlMissedPong) {
+              socket.terminate();
+              return;
+            }
+            socket.ping();
+            this.#controlMissedPong = setTimeout(
+              () => socket.terminate(),
+              10_000,
+            );
+          }, 15_000);
+          this.#controlHeartbeat.unref();
+          return;
+        }
+        if (message.type === "desktop.ready") {
           this.#controlConnected = true;
+          this.#controlRetryAttempt = 0;
+          this.#onControlStatus(true);
           for (const pending of this.#interactions.values())
             this.#sendControl(pending.request);
           return;
@@ -540,13 +582,30 @@ export class Monitor {
         /* invalid control frames are ignored */
       }
     });
+    socket.on("pong", () => {
+      if (this.#controlMissedPong) clearTimeout(this.#controlMissedPong);
+      this.#controlMissedPong = undefined;
+    });
     socket.on("close", () => {
       if (this.#controlSocket === socket) {
         this.#controlSocket = undefined;
         this.#controlConnected = false;
+        this.#onControlStatus(false);
+        if (this.#controlHeartbeat) clearInterval(this.#controlHeartbeat);
+        this.#controlHeartbeat = undefined;
+        if (this.#controlMissedPong) clearTimeout(this.#controlMissedPong);
+        this.#controlMissedPong = undefined;
+        if (!this.#stopping && !this.#controlRetry) {
+          const wait = Math.min(++this.#controlRetryAttempt, 6) * 1_000;
+          this.#controlRetry = setTimeout(() => {
+            this.#controlRetry = undefined;
+            this.#connectControl();
+          }, wait);
+          this.#controlRetry.unref();
+        }
       }
     });
-    socket.on("error", () => undefined);
+    socket.on("error", () => socket.terminate());
   }
 
   #handleRequest(request: AppServerRequest): void {
@@ -579,7 +638,6 @@ export class Monitor {
 
   async #poll(): Promise<void> {
     if (this.#polling || this.#stopping) return;
-    this.#connectControl();
     this.#polling = true;
     let finish!: () => void;
     this.#pollFinished = new Promise<void>((resolve) => {

@@ -419,9 +419,16 @@ private fun TaskCard(task: TaskSnapshot, selected: Boolean, onClick: () -> Unit)
                     else MaterialTheme.colorScheme.surface
             ),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StatusPill(statusLabel(task.status), taskStatusColor(task.status))
+                StatusPill(freshnessLabel(task.freshness), freshnessColor(task.freshness))
+            }
             Text(task.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
-            Text(statusLabel(task.status))
             task.projectName?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             if (task.plan.isNotEmpty()) {
                 val done = task.plan.count { it.status == "completed" }
@@ -432,8 +439,9 @@ private fun TaskCard(task: TaskSnapshot, selected: Boolean, onClick: () -> Unit)
                 )
             }
             Text(
-                "${freshnessLabel(task.freshness)} · ${formatTime(task.updatedAt)}",
+                "任务更新于 ${formatTime(task.updatedAt)}",
                 style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -467,7 +475,10 @@ private fun TaskDetail(
     ) {
         TextButton(close) { Text("返回任务列表") }
         Text(task.title, style = MaterialTheme.typography.headlineSmall)
-        Text("${statusLabel(task.status)} · ${freshnessLabel(task.freshness)}")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatusPill(statusLabel(task.status), taskStatusColor(task.status))
+            StatusPill(freshnessLabel(task.freshness), freshnessColor(task.freshness))
+        }
         Row(
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -525,6 +536,12 @@ private fun TaskDetail(
                             )
                         }
                     }
+                }
+                item {
+                    Text(
+                        "任务更新于 ${formatTime(task.updatedAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 item {
                     Text(
@@ -594,7 +611,12 @@ private fun TaskDetail(
                     Text("发送消息", style = MaterialTheme.typography.titleMedium)
                     HorizontalDivider()
                 }
-                item { Text("消息直接发送至对应 Codex 会话。运行期间可继续发送；选择请求会显示在上方。") }
+                item {
+                    Text(
+                        "消息直接发送至对应 Codex 会话。运行期间可继续发送；选择请求会显示在上方。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (!state.connected)
                     item { Text("连接不可用，草稿保留，恢复连接后可发送。", color = MaterialTheme.colorScheme.error) }
                 item {
@@ -625,7 +647,12 @@ private fun TaskDetail(
                                 draft.trim().length in 1..20000,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("发送消息")
+                        if (task.id in state.sending) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Text("正在发送")
+                        } else {
+                            Text("发送消息")
+                        }
                     }
                 }
                 result?.let {
@@ -684,6 +711,46 @@ private fun readableTurn(turn: JsonElement): String {
 
 private fun freshnessLabel(value: String) =
     mapOf("fresh" to "近期采集", "stale" to "缓存", "unavailable" to "无法采集")[value] ?: value
+
+@Composable
+private fun StatusPill(label: String, color: Color) {
+    Surface(
+        color = color.copy(alpha = 0.12f),
+        contentColor = color,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(7.dp).background(color, RoundedCornerShape(50)))
+            Text(label, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun taskStatusColor(status: String): Color {
+    val dark = isSystemInDarkTheme()
+    return when (status) {
+        "running" -> MaterialTheme.colorScheme.primary
+        "needs_action" -> if (dark) Color(0xFFFFCC80) else Color(0xFF8A4B08)
+        "completed" -> if (dark) Color(0xFF6CE9A6) else Color(0xFF067647)
+        "failed" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+}
+
+@Composable
+private fun freshnessColor(freshness: String): Color {
+    val dark = isSystemInDarkTheme()
+    return when (freshness) {
+        "fresh" -> if (dark) Color(0xFF6CE9A6) else Color(0xFF067647)
+        "stale" -> if (dark) Color(0xFFFFCC80) else Color(0xFF8A4B08)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+}
 
 private class CodexViewModelFactory(private val application: CodexAssistantApplication) :
     androidx.lifecycle.ViewModelProvider.Factory {

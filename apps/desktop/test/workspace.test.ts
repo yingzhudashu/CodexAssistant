@@ -19,13 +19,19 @@ it("allows local sending during cloud sync/offline and preserves a draft while t
     localStorage: { getItem: () => null }, matchMedia: () => ({ matches: false, addEventListener: () => {} }),
     window: { addEventListener: () => {}, interactionForms: {render: () => "", bind: () => {}}, codexAssistant: {
       getInteractions: async () => [], getConnection: async () => ({ configured: true }), getTasks: async () => [{ id: "task", title: "任务", status: "running", freshness: "fresh", plan: [] }],
-      getSyncStatus: async () => "syncing", getWorkstationStatus: async () => ({ ready }),
+      getSyncStatus: async () => "syncing", getWorkstationStatus: async () => ({ ready, desktopControlConnected: false }),
       onTasks: () => {}, onSyncStatus: (fn: typeof syncListener) => { syncListener = fn; }, sendTaskMessage: send,
+      onMobileRelayStatus: () => {},
     } },
   });
   runInContext(await readFile(new URL("../src/renderer/workspace.js", import.meta.url), "utf8"), context);
   await vi.waitFor(() => expect(root.innerHTML).toContain("任务工作台"));
-  runInContext("s.selected='task';s.tab='message';s.draft.set('task','继续');render()", context);
+  expect(root.innerHTML).toContain("任务更新于");
+  expect(root.innerHTML).toContain("freshness fresh");
+  runInContext("s.page='connection';s.desktopControlConnected=true;render()", context);
+  expect(root.innerHTML).toContain("手机消息转发");
+  expect(root.innerHTML).toContain("工作站控制通道已连接");
+  runInContext("s.page='tasks';s.selected='task';s.tab='message';s.draft.set('task','继续');render()", context);
   for (const cloudStatus of ["syncing", "offline"]) {
     await syncListener(cloudStatus);
     expect(root.innerHTML).not.toContain('id="send" class="primary" disabled');

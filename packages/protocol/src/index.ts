@@ -418,6 +418,13 @@ export const AuthenticatedMessageSchema = Strict({
 });
 export type AuthenticatedMessage = Static<typeof AuthenticatedMessageSchema>;
 
+// 仅发送给已登记的 Windows Desktop 控制端；它确认手机消息转发已经由服务端绑定到唯一工作站。
+export const DesktopReadyMessageSchema = Strict({
+  type: Type.Literal("desktop.ready"),
+  protocolVersion: Type.Literal(PROTOCOL_VERSION),
+});
+export type DesktopReadyMessage = Static<typeof DesktopReadyMessageSchema>;
+
 export const EventMessageSchema = Strict({
   type: Type.Literal("event"),
   protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -442,6 +449,7 @@ export type TraceResponse = Static<typeof TraceResponseSchema>;
 
 export const ServerWebSocketMessageSchema = Type.Union([
   AuthenticatedMessageSchema,
+  DesktopReadyMessageSchema,
   EventMessageSchema,
   SnapshotMessageSchema,
   ErrorMessageSchema,

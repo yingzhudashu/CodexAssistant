@@ -176,6 +176,9 @@ internal fun SettingsPage(
                                 Text("重连次数：${state.retryAttempt}")
                                 Text("同步游标：${state.cursor}")
                                 Text(
+                                    "最近收到任务状态：${state.lastStateReceivedAtEpochMs?.let { java.util.Date(it).toString() } ?: "尚未收到"}"
+                                )
+                                Text(
                                     "最近连接：${state.lastConnectedAtEpochMs?.let { java.util.Date(it).toString() } ?: "未连接"}"
                                 )
                                 Text(

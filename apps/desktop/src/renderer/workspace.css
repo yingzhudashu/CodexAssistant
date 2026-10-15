@@ -314,6 +314,39 @@ small,
 .status.paused {
   color: #8a4b08;
 }
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  font-size: 12px;
+  font-weight: 600;
+}
+.freshness i {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+.freshness.fresh {
+  color: #067647;
+}
+.freshness.stale {
+  color: #8a4b08;
+}
+.freshness.unavailable {
+  color: var(--muted);
+}
+:root[data-theme="dark"] .freshness.fresh {
+  color: #6ce9a6;
+}
+:root[data-theme="dark"] .freshness.stale {
+  color: #ffcc80;
+}
+.task-updated {
+  color: var(--muted);
+}
 :root[data-theme="dark"] .status {
   color: #a8d0ff;
 }

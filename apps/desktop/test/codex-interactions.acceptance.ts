@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DESKTOP_HOST_UNAVAILABLE_MESSAGE, Monitor } from '../src/monitor.js';
 
-const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, response: vi.fn(), hostError: undefined as Error | undefined, hostSend: vi.fn() }));
+const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, response: vi.fn(), hostError: undefined as Error | undefined, hostSend: vi.fn(), controlStatus: vi.fn() }));
 vi.mock('../src/app-server.js', () => ({ CodexAppServer: class {
   constructor(options: any) { state.request = options.onRequest; state.notification = options.onNotification; }
   get ready() { return true; }
@@ -20,17 +20,21 @@ vi.mock('ws', () => ({ default: class extends EventEmitter {
   constructor() { super(); state.socket = this; }
   send(value: string) { this.sent.push(JSON.parse(value)); }
   close() { this.readyState = 3; this.emit('close'); }
+  ping() { this.emit('pong'); }
+  terminate() { this.readyState = 3; this.emit('close'); }
 } }));
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const f of cleanup.splice(0)) await f(); vi.unstubAllGlobals(); state.response.mockReset(); state.hostSend.mockReset(); state.hostError = undefined; });
-async function fixture() {
+async function fixture(withReady = true) {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200 })));
   const directory = await mkdtemp(join(tmpdir(), 'codex-interaction-audit-'));
   const desktopHost = { sendMessage: async (threadId: string, prompt: string) => { state.hostSend(threadId, prompt); if (state.hostError) throw state.hostError; } };
-  const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: 'http://127.0.0.1:3240', token: 'synthetic-test-token', deviceId: 'test-device', onTasks() {}, desktopHost });
+  state.controlStatus.mockReset();
+  const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: 'http://127.0.0.1:3240', token: 'synthetic-test-token', deviceId: 'test-device', onTasks() {}, onControlStatus: state.controlStatus, desktopHost });
   cleanup.push(async () => { await monitor.stop(); await rm(directory, { recursive: true, force: true }); });
   await monitor.start();
   state.socket.emit("message", JSON.stringify({type:"authenticated"}));
+  if (withReady) state.socket.emit("message", JSON.stringify({type:"desktop.ready", protocolVersion:"codex-assistant.v3"}));
   return state.socket;
 }
 
@@ -75,6 +79,19 @@ it('returns a submission result to the phone instead of silently discarding the 
   const request = socket.sent.find((m: any) => m.type === 'interaction.request');
   socket.emit('message', JSON.stringify({ type: 'interaction.submit', requestId: request.requestId, threadId: request.threadId, value: {decision:'decline'} }));
   expect(socket.sent.some((m: any) => m.type === 'interaction.result')).toBe(true);
+});
+
+it('marks the mobile relay ready only after the server accepts the Desktop controller role', async () => {
+  const socket = await fixture(false);
+  state.request({ id: 91, method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-pending', turnId: 'turn-pending', itemId: 'item-pending', command: 'synthetic' } });
+  expect(state.controlStatus).not.toHaveBeenCalledWith(true);
+  expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'role', role: 'desktop' }));
+  expect(socket.sent).not.toContainEqual(expect.objectContaining({ type: 'interaction.request' }));
+  socket.emit('message', JSON.stringify({ type: 'desktop.ready', protocolVersion: 'codex-assistant.v3' }));
+  expect(state.controlStatus).toHaveBeenLastCalledWith(true);
+  expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'interaction.request', threadId: 'thread-pending' }));
+  socket.close();
+  expect(state.controlStatus).toHaveBeenLastCalledWith(false);
 });
 
 it('forwards consecutive messages to the Desktop host without local writer RPCs', async () => {

@@ -5,7 +5,7 @@
   "intro": "面向 Windows Codex 工作站与 Android 手机/平板的任务进度查看、回合摘要与消息交互工具。",
   "scope": "当前工作树为 Windows Electron 工作站和 Android Compose 手机/平板；无独立 Web、iOS 或 macOS 客户端。采用共享 Token 的单工作站模型，不存在账号切换、角色权限或通用资源删除。源码版本与发布状态见 [发布说明](release.zh-CN.md)。",
   "findings": "本轮保留任务、计划、详情、消息、交互、设置与通知，补齐清除筛选/清空草稿/复制摘要；桌面相同快照不重建 DOM，富文本改用禁用 HTML 的 markdown-it；Android 保留任务草稿、累积回执，限制详情传输缓存。后台恢复沿进程唯一 Coordinator 执行。具体通过项与未验证范围见 [验收记录](acceptance.zh-CN.md)。",
-  "contracts": "|域|显示与数据合同|\n|---|---|\n|任务状态|running进行中、completed已完成、failed失败、needs_action待确认|\n|freshness|fresh近期采集、stale缓存/上次同步、unavailable无法采集；独立于网络状态|\n|回合|inProgress/completed/interrupted/failed；中断不新增任务枚举|\n|计划|pending/in_progress/completed/failed；无plan不显示0/0或虚构步骤|\n|排序|updatedAt降序；同时间不承诺字典序|\n|详情|关闭丢可见分页；Android传输层最多20个单页回执，避免无界缓存|\n|消息|started/failed是发送回执；进展另读摘要，不合成回复流|\n|交互|按requestId+threadId关联，多问题一次提交；只处理Monitor实际拥有的官方请求|\n|身份|共享Token、一个工作站控制器；无账号角色隔离|\n|工作站ready|仅采集器app-server初始化，不保证非公开Desktop发送通道可用|\n",
+  "contracts": "|域|显示与数据合同|\n|---|---|\n|任务状态|running进行中、completed已完成、failed失败、needs_action待确认|\n|freshness|fresh近期数据、stale缓存数据、unavailable无法采集；独立于网络状态|\n|回合|inProgress/completed/interrupted/failed；中断不新增任务枚举|\n|计划|pending/in_progress/completed/failed；无plan不显示0/0或虚构步骤|\n|排序|updatedAt降序；同时间不承诺字典序|\n|详情|关闭丢可见分页；Android传输层最多20个单页回执，避免无界缓存|\n|状态时间|任务更新时间、状态变化时间与最近收到服务端状态时间分别展示|\n|消息|started/failed是发送回执；进展另读摘要，不合成回复流|\n|交互|按requestId+threadId关联，多问题一次提交；只处理Monitor实际拥有的官方请求|\n|身份|共享Token、一个工作站控制器；无账号角色隔离|\n|工作站ready|采集器app-server初始化；手机消息转发另以服务端确认的控制端状态显示|\n",
   "platforms": "Windows关闭窗口继续托盘采集，双击托盘恢复，右键菜单打开/退出；退出等待队列和子进程收尾。Android唯一前台同步服务，低重要性常驻通知与任务变化通知分渠道，系统决定权限和后台限制。更新读取清单后交给系统浏览器，不在应用中模拟安装进度。独立app-server不能代答Desktop自己的审批。",
   "tokens": {
     "bg": "#F3F6FB",
@@ -188,7 +188,7 @@
         {
           "label": "任务",
           "value": "同步协调器 · 进行中 · 2/5步骤",
-          "rule": "标题2行；状态文字；有效plan才显示进度",
+          "rule": "状态与freshness各自标记；标题最多2行，有效plan才显示进度，更新时间单独标注",
           "kind": "record"
         },
         {
@@ -254,7 +254,7 @@
         {
           "label": "状态",
           "value": "进行中 · 近期采集",
-          "rule": "同时显示业务状态/freshness，runtimeStatus只在诊断展开",
+          "rule": "业务状态与数据新鲜度使用不同文字标记，runtimeStatus只在诊断展开",
           "kind": "record"
         },
         {
@@ -435,7 +435,7 @@
           "success": "收到started显示“Codex Desktop 已接受消息，可继续发送；进展请查看回合摘要”；清空本次未更改的草稿并恢复发送。",
           "failure": "无宿主/多个宿主/拒绝显示固定脱敏错误；超时或断线提示结果尚未确认，保留草稿，禁止自动重发。",
           "pre": "Windows：workstation.status.ready=true；Android：已完成云端订阅。正文去首尾空白后1–20000字符、运行中仍可继续发送；云端同步中不禁用Windows本机发送。",
-          "pending": "“发送”禁用并显示“处理中…”；本页对象保留，禁止并发重复提交。",
+          "pending": "按钮禁用并显示“正在发送”；保留本页，禁止并发重复提交。",
           "back": "离开不取消已发出的写操作；连接编辑按G14确认，普通任务草稿保留。",
           "test": "验证前置条件、实际完成结果、失败保留内容、重复操作和返回；不以按钮动画认定成功。",
           "id": "CA-06.I01",
@@ -830,7 +830,7 @@
       ],
       "entry": "任务详情诊断或设置连接状态；返回原页。",
       "source": "apps/desktop/src/renderer/workspace.js",
-      "binding": "MonitorStatus、TaskSnapshot.runtimeStatus、freshness及错误。 Android：SyncCoordinator.state / TaskRepository；恢复设计已实现。",
+      "binding": "MonitorStatus、TaskSnapshot.runtimeStatus、freshness及错误。Desktop IPC另报告服务端确认的桌面控制端状态；Android TaskRepository报告最近收到任务事件或快照的时间。",
       "fields": [
         {
           "label": "传输",
@@ -850,8 +850,8 @@
         {
           "label": "诊断",
           "kind": "record",
-          "value": "同步游标与最近连接",
-          "rule": "Android显示游标/重连次数/traceId；Windows显示设备ID/协议，不伪造队列计数"
+          "value": "同步游标与最近状态",
+          "rule": "Android显示游标/重连次数/最近状态接收时间/traceId；Windows分开显示数据同步和Desktop控制通道，不伪造队列计数"
         }
       ],
       "actions": [
@@ -957,7 +957,7 @@
       "hide_primary_navigation": true
     }
   ],
-  "global": "### 统一规则\n\nG01：元数据、连接状态、freshness 和消息回执分开显示；缺失信息显示未提供，不能用0或已完成冒充。保留已知任务，恢复 snapshot 校准。\n\nG02：普通消息同任务有在途请求时禁重复提交；started 仅表示 Desktop 接受。失败/超时保留草稿，旧回执不清除用户已编辑的新草稿。断网不自动重放写操作。\n\nG03：连接编辑取消时若有修改需确认；普通任务导航保留草稿，关闭详情释放可见分页。Windows 配置保存后清空旧服务界面状态。Android 配置重建 Coordinator，旧 socket 代次失效。\n\nG04：正文 trim 后1–20000 UTF-16代码单元；地址为 HTTPS 根地址或回环 HTTP，Token 16–4096。错误显示真实原因，不把本地保存和远端握手合成一个成功承诺。\n\nG05：Windows Enter发送、Shift+Enter换行，IME组合时不发送；Android 多行输入用显式发送按钮。清空草稿只操作本机输入，不撤销已发送消息。\n\nG06：回合摘要按需获取，每页20，cursor存在才继续；合并去重，旧页面响应不覆盖新页面。没有回复流或自动底部跟随承诺。Windows Markdown 安全解析；Android 文本摘要支持复制，不执行 HTML。\n\nG07：Android 认证/协议错误停止重试；网络错误按1–6秒恢复，snapshot前禁远端发送。服务控制请求30秒、本地Android发送120秒结束未确认等待，详情30秒。Windows本机ready与云端同步分别判断。\n\nG08：时间按设备时区格式化；Windows使用本地化日期时间，Android含UTC偏移。任务时间不随轮询伪造更新；最后采集时间另示。\n\nG09：使用原生按钮/输入语义、焦点圈和文字状态；错误持续展示，不能只靠颜色。读屏、200%字号、系统缩放是独立验收项，未实测不得标通过。\n\nG10：Android详情由外层消费IME padding；二级页不保留底部导航。系统返回按键盘→详情/设置子页→一级页处理。\n\nG11：每个动作按其执行类别验证正常、不可用、重复操作和返回；图中成功与失败为分支，不是连续步骤。\n\nG12：仅实现本合同中的功能，不引入账号注销、批量删除、文件上传、动态色或后台任务控制等无业务接口的占位按钮。\n\nG13：local以本地状态变化完成；read以有效只读结果完成；write以匹配业务回执完成；system以安全存储/剪贴板/浏览器等实际调用完成，不推断安装或任务成功。\n\nG14：连接修改放弃确认保留继续编辑入口；普通消息草稿不因关闭详情自动丢弃。\n\nG15：交互请求一次提交全部必填问题，按官方schema验证，失败保留输入；秘密答案仅驻内存，不写诊断。\n\nG16：Windows导航为任务/连接状态/外观/关于；Android一级任务/设置，设置内连接/外观/通知/关于。通知点击打开应用，任务详情从列表选择。",
+  "global": "### 统一规则\n\nG01：元数据、连接状态、freshness 和消息回执分开显示；缺失信息显示未提供，不能用0或已完成冒充。保留已知任务，恢复 snapshot 校准。\n\nG02：普通消息同任务有在途请求时禁重复提交；started 仅表示 Desktop 接受。失败/超时保留草稿，旧回执不清除用户已编辑的新草稿。断网不自动重放写操作。\n\nG03：连接编辑取消时若有修改需确认；普通任务导航保留草稿，关闭详情释放可见分页。Windows 配置保存后清空旧服务界面状态。Android 配置重建 Coordinator，旧 socket 代次失效。\n\nG04：正文 trim 后1–20000 UTF-16代码单元；地址为 HTTPS 根地址或回环 HTTP，Token 16–4096。错误显示真实原因，不把本地保存和远端握手合成一个成功承诺。\n\nG05：Windows Enter发送、Shift+Enter换行，IME组合时不发送；Android 多行输入用显式发送按钮。清空草稿只操作本机输入，不撤销已发送消息。\n\nG06：回合摘要按需获取，每页20，cursor存在才继续；合并去重，旧页面响应不覆盖新页面。没有回复流或自动底部跟随承诺。Windows Markdown 安全解析；Android 文本摘要支持复制，不执行 HTML。\n\nG07：Android 认证/协议错误停止重试；网络错误按1–6秒恢复，snapshot前禁远端发送。服务控制请求30秒、本地Android发送120秒结束未确认等待，详情30秒。Windows本机ready、云端同步和服务端确认的手机消息控制通道分别判断。\n\nG08：时间按设备时区格式化；Windows使用本地化日期时间，Android含UTC偏移。任务更新时间不随轮询伪造；状态变化、最近收到状态和最后采集时间分别标注。\n\nG09：使用原生按钮/输入语义、焦点圈和文字状态；错误持续展示，不能只靠颜色。读屏、200%字号、系统缩放是独立验收项，未实测不得标通过。\n\nG10：Android详情由外层消费IME padding；二级页不保留底部导航。系统返回按键盘→详情/设置子页→一级页处理。\n\nG11：每个动作按其执行类别验证正常、不可用、重复操作和返回；图中成功与失败为分支，不是连续步骤。\n\nG12：仅实现本合同中的功能，不引入账号注销、批量删除、文件上传、动态色或后台任务控制等无业务接口的占位按钮。\n\nG13：local以本地状态变化完成；read以有效只读结果完成；write以匹配业务回执完成；system以安全存储/剪贴板/浏览器等实际调用完成，不推断安装或任务成功。\n\nG14：连接修改放弃确认保留继续编辑入口；普通消息草稿不因关闭详情自动丢弃。\n\nG15：交互请求一次提交全部必填问题，按官方schema验证，失败保留输入；秘密答案仅驻内存，不写诊断。\n\nG16：Windows导航为任务/连接状态/外观/关于；Android一级任务/设置，设置内连接/外观/通知/关于。通知点击打开应用，任务详情从列表选择。",
   "routes": {
     "任务": "CA-03",
     "连接状态": "CA-12",

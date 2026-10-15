@@ -24,7 +24,10 @@ contextBridge.exposeInMainWorld("codexAssistant", {
       "connecting" | "syncing" | "connected" | "offline"
     >,
   getWorkstationStatus: () =>
-    ipcRenderer.invoke("workstation.status") as Promise<{ ready: boolean }>,
+    ipcRenderer.invoke("workstation.status") as Promise<{
+      ready: boolean;
+      desktopControlConnected: boolean;
+    }>,
   getTaskDetail: (input: { threadId: string; cursor?: string }) =>
     ipcRenderer.invoke("task.detail", input) as Promise<{
       turns: unknown[];
@@ -63,5 +66,11 @@ contextBridge.exposeInMainWorld("codexAssistant", {
     ) => listener(status);
     ipcRenderer.on("sync.status", handler);
     return () => ipcRenderer.removeListener("sync.status", handler);
+  },
+  onMobileRelayStatus: (listener: (connected: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, connected: boolean) =>
+      listener(connected);
+    ipcRenderer.on("mobile-relay.status", handler);
+    return () => ipcRenderer.removeListener("mobile-relay.status", handler);
   },
 });

@@ -54,9 +54,9 @@ G05：Windows Enter发送、Shift+Enter换行，IME组合时不发送；Android 
 
 G06：回合摘要按需获取，每页20，cursor存在才继续；合并去重，旧页面响应不覆盖新页面。没有回复流或自动底部跟随承诺。Windows Markdown 安全解析；Android 文本摘要支持复制，不执行 HTML。
 
-G07：Android 认证/协议错误停止重试；网络错误按1–6秒恢复，snapshot前禁远端发送。服务控制请求30秒、本地Android发送120秒结束未确认等待，详情30秒。Windows本机ready与云端同步分别判断。
+G07：Android 认证/协议错误停止重试；网络错误按1–6秒恢复，snapshot前禁远端发送。服务控制请求30秒、本地Android发送120秒结束未确认等待，详情30秒。Windows本机ready、云端同步和服务端确认的手机消息控制通道分别判断。
 
-G08：时间按设备时区格式化；Windows使用本地化日期时间，Android含UTC偏移。任务时间不随轮询伪造更新；最后采集时间另示。
+G08：时间按设备时区格式化；Windows使用本地化日期时间，Android含UTC偏移。任务更新时间不随轮询伪造；状态变化、最近收到状态和最后采集时间分别标注。
 
 G09：使用原生按钮/输入语义、焦点圈和文字状态；错误持续展示，不能只靠颜色。读屏、200%字号、系统缩放是独立验收项，未实测不得标通过。
 
@@ -85,15 +85,16 @@ G16：Windows导航为任务/连接状态/外观/关于；Android一级任务/�
 |域|显示与数据合同|
 |---|---|
 |任务状态|running进行中、completed已完成、failed失败、needs_action待确认|
-|freshness|fresh近期采集、stale缓存/上次同步、unavailable无法采集；独立于网络状态|
+|freshness|fresh近期数据、stale缓存数据、unavailable无法采集；独立于网络状态|
 |回合|inProgress/completed/interrupted/failed；中断不新增任务枚举|
 |计划|pending/in_progress/completed/failed；无plan不显示0/0或虚构步骤|
 |排序|updatedAt降序；同时间不承诺字典序|
 |详情|关闭丢可见分页；Android传输层最多20个单页回执，避免无界缓存|
+|状态时间|任务更新时间、状态变化时间与最近收到服务端状态时间分别展示|
 |消息|started/failed是发送回执；进展另读摘要，不合成回复流|
 |交互|按requestId+threadId关联，多问题一次提交；只处理Monitor实际拥有的官方请求|
 |身份|共享Token、一个工作站控制器；无账号角色隔离|
-|工作站ready|仅采集器app-server初始化，不保证非公开Desktop发送通道可用|
+|工作站ready|采集器app-server初始化；手机消息转发另以服务端确认的控制端状态显示|
 
 
 ## 5. 页面注册表
@@ -259,7 +260,7 @@ G16：Windows导航为任务/连接状态/外观/关于；Android一级任务/�
 |连接状态|record|已连接 · 最近同步 12秒前|连接状态独立于任务状态；显示快照同步时间|
 |搜索|input|同步协调器|标题/projectName本地不区分大小写包含搜索；空值显示全部|
 |状态筛选|select|全部|全部+四种协议任务状态，不添加离线/已取消到任务枚举|
-|任务|record|同步协调器 · 进行中 · 2/5步骤|标题2行；状态文字；有效plan才显示进度|
+|任务|record|同步协调器 · 进行中 · 2/5步骤|状态与freshness各自标记；标题最多2行，有效plan才显示进度，更新时间单独标注|
 |最近变化|record|部署检查 · 已完成 · 3分钟前|按updatedAt降序；时间为任务来源时间，不是轮询时间|
 
 **页面规则**：不添加批量已读、删除任务或重试任务按钮，因为没有对应业务合同。成功空快照显示“暂无任务”；首次未收快照显示“等待首次同步”。
@@ -323,7 +324,7 @@ G16：Windows导航为任务/连接状态/外观/关于；Android一级任务/�
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
 |任务|record|同步协调器|完整标题，最多120字符；projectName为可选副标题|
-|状态|record|进行中 · 近期采集|同时显示业务状态/freshness，runtimeStatus只在诊断展开|
+|状态|record|进行中 · 近期采集|业务状态与数据新鲜度使用不同文字标记，runtimeStatus只在诊断展开|
 |步骤|record|正在验证断线恢复 · 2/5|展示plan内每步状态；无plan显示未提供，不虚构当前步骤|
 |执行目标|record|确保设备恢复后继续同步|仅goal存在才显示objective和Token用量|
 |最近回合|record|进行中 · 开始于09:30|缺失时显示“暂无回合记录”|
@@ -502,7 +503,7 @@ G16：Windows导航为任务/连接状态/外观/关于；Android一级任务/�
 |触发与前置|Windows：workstation.status.ready=true；Android：已完成云端订阅。正文去首尾空白后1–20000字符、运行中仍可继续发送；云端同步中不禁用Windows本机发送。|
 |执行类别|write（按G13解释）|
 |事件/调用|`task.send / send(threadId,text,requestId)`|
-|处理中|“发送”禁用并显示“处理中…”；本页对象保留，禁止并发重复提交。|
+|处理中|按钮禁用并显示“正在发送”；保留本页，禁止并发重复提交。|
 |成功|收到started显示“Codex Desktop 已接受消息，可继续发送；进展请查看回合摘要”；清空本次未更改的草稿并恢复发送。|
 |失败/重试|无宿主/多个宿主/拒绝显示固定脱敏错误；超时或断线提示结果尚未确认，保留草稿，禁止自动重发。|
 |返回/取消|离开不取消已发出的写操作；连接编辑按G14确认，普通任务草稿保留。|
@@ -900,13 +901,13 @@ G16：Windows导航为任务/连接状态/外观/关于；Android一级任务/�
 
 **布局**：按字段层级纵向排布，可滚动；详情用执行计划/回合摘要/发送消息分区，操作就近展示。图稿仅表示结构，实际采用原生平台组件。
 
-**数据绑定**：`apps/desktop/src/renderer/workspace.js`。MonitorStatus、TaskSnapshot.runtimeStatus、freshness及错误。 Android：SyncCoordinator.state / TaskRepository；恢复设计已实现。
+**数据绑定**：`apps/desktop/src/renderer/workspace.js`。MonitorStatus、TaskSnapshot.runtimeStatus、freshness及错误。Desktop IPC另报告服务端确认的桌面控制端状态；Android TaskRepository报告最近收到任务事件或快照的时间。
 
 |控件（从上到下）|类型|图中示例|校验/显示合同|
 |---|---|---|---|
 |传输|record|连接中|Windows与Android各自状态枚举；Android 恢复状态不可混同工作站不可达|
 |服务地址|record|https://monitor.example.test|显示保存的根地址，不回显Token|
-|诊断|record|同步游标与最近连接|Android显示游标/重连次数/traceId；Windows显示设备ID/协议，不伪造队列计数|
+|诊断|record|同步游标与最近状态|Android显示游标/重连次数/最近状态接收时间/traceId；Windows分开显示数据同步和Desktop控制通道，不伪造队列计数|
 
 **页面规则**：没有队列计数IPC时显示“待上传数量未提供”；不得显示0。outbox满是上传故障，不是任务失败，不提供破坏性清空按钮。离线不能一律称为网络故障。无默认网络显示等待网络；重连显示恢复进度与退避；认证/协议错误引导编辑配置。后台服务不可用与网络状态分别说明。
 

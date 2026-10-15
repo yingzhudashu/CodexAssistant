@@ -29,6 +29,7 @@ data class TaskState(
     val retryAttempt: Int = 0,
     val retryAtEpochMs: Long? = null,
     val lastConnectedAtEpochMs: Long? = null,
+    val lastStateReceivedAtEpochMs: Long? = null,
     val lastTraceId: String? = null,
     val details: Map<String, DetailMessage> = emptyMap(),
     val sending: Map<String, String> = emptyMap(),
@@ -411,7 +412,7 @@ internal constructor(
                                                         tasks = upsert(state.tasks, event.task),
                                                         taskChanges = taskChanges.changes,
                                                         error = null,
-                                                        lastConnectedAtEpochMs =
+                                                        lastStateReceivedAtEpochMs =
                                                             System.currentTimeMillis(),
                                                         lastTraceId = event.trace.traceId,
                                                     )
@@ -454,6 +455,8 @@ internal constructor(
                                                             },
                                                         error = null,
                                                         lastConnectedAtEpochMs =
+                                                            System.currentTimeMillis(),
+                                                        lastStateReceivedAtEpochMs =
                                                             System.currentTimeMillis(),
                                                         isRefreshing = false,
                                                         refreshError = null,
