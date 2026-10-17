@@ -12,7 +12,7 @@
 - `runtimeStatus` 是官方线程运行态：`notLoaded`、`idle`、`systemError`、`active`。
 - `activeFlags` 只表示 `waitingOnApproval` 或 `waitingOnUserInput`。
 - `latestTurn` 表示最近回合的 `inProgress`、`completed`、`interrupted` 或 `failed`，错误只保留安全代码和脱敏摘要。
-- `freshness` 表示 `fresh`、`stale` 或 `unavailable`；详情 RPC 失败时不得把缓存线程改写成失败。
+- `freshness` 表示 `fresh`、`stale` 或 `unavailable`；详情 RPC 失败时不得把缓存线程改写成失败。多个详情源独立读取；任一源失败会保留该字段最近成功值并标记 stale，后续轮询重试，不能把部分详情伪装成完整新鲜数据。
 
 当前展示状态按以下顺序决定（工作站收到的待处理交互另行覆盖为 needs_action）：
 

@@ -64,6 +64,15 @@ export function safeTraceSpan(span: TraceSpan): TraceSpan {
     "outbox",
     "replayCount",
     "traceDropped",
+    "lifecycleReadFailures",
+    "lifecycleCatchups",
+    "lifecyclePathMissing",
+    "lifecycleEvidenceMissing",
+    "detailFailures",
+    "threadFailures",
+    "goalFailures",
+    "turnFailures",
+    "itemFailures",
   ]);
   for (const [key, value] of Object.entries(span.attributes ?? {})) {
     if (numeric.has(key) && /^\d+(?:\.\d+)?$/.test(value))

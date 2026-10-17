@@ -53,6 +53,13 @@ import { LifecycleReader, type Lifecycle } from "./lifecycle.js";
 import { CodexDesktopHost } from "./codex-host.js";
 
 type PendingEvent = IngestEvent & { fingerprint: string };
+type CachedValue<T> = { loaded: boolean; failed: boolean; value?: T };
+type ThreadDetails = {
+  thread: CachedValue<unknown>;
+  goal: CachedValue<unknown>;
+  turns: CachedValue<unknown>;
+  items: CachedValue<unknown>;
+};
 type StoredOutbox = {
   deviceId: string;
   nextSequence: number;
@@ -60,7 +67,14 @@ type StoredOutbox = {
   fingerprints: Record<string, string>;
 };
 // 只缓存官方基础快照；生命周期投影必须每轮重新计算，不能把推断的 active 写回基础状态。
-type CachedTask = { stamp: string; task: TaskSnapshot; lifecycle?: Lifecycle };
+type CachedTask = {
+  stamp: string;
+  lifecycleStamp?: string;
+  task: TaskSnapshot;
+  lifecycle?: Lifecycle;
+  details: ThreadDetails;
+  detailFailures: number;
+};
 export const ACTIVE_EVIDENCE_MAX_AGE_MS = 30 * 60_000;
 export const IN_PROGRESS_ITEM_MAX_AGE_MS = 6 * 60 * 60_000;
 
@@ -647,6 +661,15 @@ export class Monitor {
     const trace = newTraceContext();
     const startedAt = performance.now();
     this.#server.setTraceContext(trace);
+    let lifecycleReadFailures = 0;
+    let lifecycleCatchups = 0;
+    let lifecyclePathMissing = 0;
+    let lifecycleEvidenceMissing = 0;
+    let detailFailures = 0;
+    let threadFailures = 0;
+    let goalFailures = 0;
+    let turnFailures = 0;
+    let itemFailures = 0;
     try {
       await this.#server.start();
       const threads = await this.#server.listThreads();
@@ -671,7 +694,24 @@ export class Monitor {
         delete this.#outbox.fingerprints[id];
       let tasks = await mapLimit(threads, RPC_CONCURRENCY, async (thread) => {
         try {
-          return await this.#normalizeCached(thread);
+          return await this.#normalizeCached(
+            thread,
+            (catchingUp) => {
+              lifecycleReadFailures++;
+              if (catchingUp) lifecycleCatchups++;
+            },
+            (state) => {
+              if (state === "path_missing") lifecyclePathMissing++;
+              if (state === "evidence_missing") lifecycleEvidenceMissing++;
+            },
+            (source) => {
+              detailFailures++;
+              if (source === "thread") threadFailures++;
+              if (source === "goal") goalFailures++;
+              if (source === "turns") turnFailures++;
+              if (source === "items") itemFailures++;
+            },
+          );
         } catch {
           return this.#staleTask(thread);
         }
@@ -698,6 +738,15 @@ export class Monitor {
           threads: String(threads.length),
           tasks: String(tasks.length),
           outbox: String(this.#outbox.events.length),
+          lifecycleReadFailures: String(lifecycleReadFailures),
+          lifecycleCatchups: String(lifecycleCatchups),
+          lifecyclePathMissing: String(lifecyclePathMissing),
+          lifecycleEvidenceMissing: String(lifecycleEvidenceMissing),
+          detailFailures: String(detailFailures),
+          threadFailures: String(threadFailures),
+          goalFailures: String(goalFailures),
+          turnFailures: String(turnFailures),
+          itemFailures: String(itemFailures),
         }),
       );
       this.#startTraceUpload();
@@ -736,9 +785,32 @@ export class Monitor {
     };
   }
 
-  async #normalizeCached(thread: AppServerThread): Promise<TaskSnapshot> {
-    const lifecycle = await this.#lifecycle.read(thread.id, thread.path);
+  async #normalizeCached(
+    thread: AppServerThread,
+    onLifecycleReadFailure: (catchingUp: boolean) => void,
+    onLifecycleUnavailable: (
+      state: "path_missing" | "evidence_missing",
+    ) => void,
+    onDetailReadFailure: (
+      source: "thread" | "goal" | "turns" | "items",
+    ) => void,
+  ): Promise<TaskSnapshot> {
+    let lifecycle: Lifecycle | undefined;
+    let lifecycleReadFailed = false;
+    try {
+      lifecycle = await this.#lifecycle.read(thread.id, thread.path);
+    } catch (error) {
+      // rollout 读取失败不应连带丢弃 app-server 已能提供的线程、回合和操作详情。
+      lifecycleReadFailed = true;
+      onLifecycleReadFailure(
+        error instanceof Error && error.message === "LIFECYCLE_CATCHING_UP",
+      );
+    }
+    if (!thread.path) onLifecycleUnavailable("path_missing");
+    else if (!lifecycle && !lifecycleReadFailed)
+      onLifecycleUnavailable("evidence_missing");
     const stamp = JSON.stringify([
+      thread.path ?? null,
       thread.updatedAt,
       thread.status,
       thread.name,
@@ -746,8 +818,25 @@ export class Monitor {
       this.#server.planRevision(thread.id),
       this.#server.latestTurn(thread.id),
     ]);
+    // 旧会话启动新回合时，rollout 先出现新 lifecycle 事件，线程元数据可能尚未更新；
+    // 将其纳入缓存失效条件，以便重新读取当前回合操作，而不是沿用上轮缓存。
+    const lifecycleStamp = lifecycle
+      ? JSON.stringify([
+          lifecycle.turnId,
+          lifecycle.updatedAt,
+          lifecycle.turn.status,
+        ])
+      : undefined;
     const cached = this.#threadCache.get(thread.id);
-    if (cached?.stamp === stamp) {
+    const sameDataStamp =
+      cached?.stamp === stamp &&
+      (lifecycleReadFailed || cached.lifecycleStamp === lifecycleStamp);
+    if (
+      cached?.stamp === stamp &&
+      !lifecycleReadFailed &&
+      cached.lifecycleStamp === lifecycleStamp &&
+      cached.detailFailures === 0
+    ) {
       cached.lifecycle = lifecycle;
       return applyLifecycle(
         cached.task,
@@ -756,8 +845,60 @@ export class Monitor {
         this.#inProgressItems.get(thread.id) === true,
       );
     }
-    const task = await this.#normalize(thread, lifecycle);
-    const entry: CachedTask = { stamp, task, lifecycle };
+    // 相同的线程元数据与生命周期读取错误不值得每两秒重复四个详情 RPC；
+    // 将最近一次快照作为 stale 返回，下一轮仍会重试 rollout 读取。
+    if (
+      cached?.stamp === stamp &&
+      lifecycleReadFailed &&
+      cached.detailFailures === 0
+    )
+      return this.#staleTask(thread);
+
+    const details = cached?.details ?? {
+      thread: { loaded: false, failed: false },
+      goal: { loaded: false, failed: false },
+      turns: { loaded: false, failed: false },
+      items: { loaded: false, failed: false },
+    };
+    const sources = ["thread", "goal", "turns", "items"] as const;
+    const readDetail = {
+      thread: () => this.#server.readThread(thread.id),
+      goal: () => this.#server.getGoal(thread.id),
+      turns: () => this.#server.listTurns(thread.id),
+      items: () => this.#server.listItems(thread.id),
+    };
+    const pendingSources = sources.filter(
+      (source) =>
+        !sameDataStamp || !details[source].loaded || details[source].failed,
+    );
+    const results = await Promise.allSettled(
+      pendingSources.map((source) => readDetail[source]()),
+    );
+    for (const [index, result] of results.entries()) {
+      const source = pendingSources[index]!;
+      if (result.status === "fulfilled")
+        details[source] = { loaded: true, failed: false, value: result.value };
+      else {
+        details[source] = { ...details[source], failed: true };
+        onDetailReadFailure(source);
+      }
+    }
+    const failedDetails = sources.filter(
+      (source) => details[source].failed,
+    ).length;
+    const task = this.#normalize(thread, lifecycle, details, failedDetails > 0);
+    const entry: CachedTask = {
+      stamp,
+      lifecycleStamp: lifecycleReadFailed
+        ? cached?.lifecycleStamp
+        : lifecycleStamp,
+      task,
+      // 临时读取失败时保留最后一次成功证据供明确标为 stale 的失败路径使用；
+      // 本轮状态投影仍只使用本轮成功读取的 lifecycle。
+      lifecycle: lifecycleReadFailed ? cached?.lifecycle : lifecycle,
+      details,
+      detailFailures: failedDetails,
+    };
     this.#threadCache.set(thread.id, entry);
     return applyLifecycle(
       task,
@@ -769,14 +910,44 @@ export class Monitor {
 
   #staleTask(thread: AppServerThread): TaskSnapshot {
     const updatedAt = this.#timestamp(thread.updatedAt);
-    const runtimeStatus = normalizeRuntimeStatus(thread.status);
-    const activeFlags = normalizeActiveFlags(thread.status);
     const entry = this.#threadCache.get(thread.id);
+    const hasCurrentStatus = thread.status !== undefined;
+    const runtimeStatus = hasCurrentStatus
+      ? normalizeRuntimeStatus(thread.status)
+      : (entry?.task.runtimeStatus ?? normalizeRuntimeStatus(thread.status));
+    const activeFlags = hasCurrentStatus
+      ? normalizeActiveFlags(thread.status)
+      : (entry?.task.activeFlags ?? normalizeActiveFlags(thread.status));
+    // 保留缓存中详情字段，但不让旧运行态遮蔽 thread/list 最新的官方状态。
+    const rebased = entry
+      ? {
+          ...entry.task,
+          ...(thread.name || thread.preview
+            ? { title: sanitizeText(thread.name || thread.preview) }
+            : {}),
+          ...(projectName(thread.cwd)
+            ? { projectName: projectName(thread.cwd) }
+            : {}),
+          ...(thread.updatedAt !== undefined ? { updatedAt } : {}),
+          runtimeStatus,
+          activeFlags,
+          ...(hasCurrentStatus
+            ? {
+                status: deriveTaskStatus(
+                  entry.task.goal?.status,
+                  runtimeStatus,
+                  activeFlags,
+                  entry.task.latestTurn,
+                ),
+              }
+            : {}),
+        }
+      : undefined;
     // 文件暂不可读时仍重新检查旧证据的有效期，不能借错误路径永久冻结 active。
-    const cached = entry
+    const cached = rebased
       ? applyLifecycle(
-          entry.task,
-          entry.lifecycle,
+          rebased,
+          entry?.lifecycle,
           Date.now(),
           this.#inProgressItems.get(thread.id) === true,
         )
@@ -817,23 +988,27 @@ export class Monitor {
     };
   }
 
-  async #normalize(
+  #normalize(
     thread: AppServerThread,
     lifecycle?: Lifecycle,
-  ): Promise<TaskSnapshot> {
-    const [read, goal, turns, items] = await Promise.all([
-      this.#server.readThread(thread.id),
-      this.#server.getGoal(thread.id),
-      this.#server.listTurns(thread.id),
-      this.#server.listItems(thread.id),
-    ]);
-    const loaded = asRecord(read).thread;
+    details: ThreadDetails = {
+      thread: { loaded: false, failed: false },
+      goal: { loaded: false, failed: false },
+      turns: { loaded: false, failed: false },
+      items: { loaded: false, failed: false },
+    },
+    detailsStale = false,
+  ): TaskSnapshot {
+    const loadedThread = asRecord(details.thread.value).thread;
     const currentThread =
-      loaded && typeof loaded === "object"
-        ? { ...(loaded as AppServerThread), ...thread }
+      details.thread.loaded && loadedThread && typeof loadedThread === "object"
+        ? { ...(loadedThread as AppServerThread), ...thread }
         : thread;
+    const goal = details.goal.value;
+    const turns = details.turns.value;
+    const items = details.items.value;
     const goalData =
-      goal && typeof goal === "object"
+      details.goal.loaded && goal && typeof goal === "object"
         ? (goal as Record<string, unknown>)
         : undefined;
     const turnRows = asRecord(turns).data ?? turns;
@@ -881,7 +1056,7 @@ export class Monitor {
       status,
       runtimeStatus,
       activeFlags,
-      freshness: "fresh",
+      freshness: detailsStale ? "stale" : "fresh",
       source: goalStatus ? "goal" : "thread",
       ...(goalStatus
         ? {
@@ -906,7 +1081,16 @@ export class Monitor {
           }
         : {}),
       ...(latestTurn ? { latestTurn } : {}),
-      ...(error ? { error } : {}),
+      ...(error
+        ? { error }
+        : detailsStale
+          ? {
+              error: {
+                code: "DETAIL_UNAVAILABLE",
+                message: "部分线程详情暂不可用，状态按当前可用数据展示",
+              },
+            }
+          : {}),
       plan,
       ...(currentStep ? { currentStepId: currentStep.id } : {}),
       ...(latestAction && normalizeAction(latestAction)
@@ -1253,7 +1437,7 @@ export function applyLifecycle(
       },
     };
   }
-  const { error: _error, ...base } = task;
+  const { error: previousError, ...base } = task;
   const latestTurn = lifecycle.turn;
   const evidenceTime = Date.parse(lifecycle.evidenceAt);
   const updatedAt =
@@ -1286,6 +1470,7 @@ export function applyLifecycle(
       updatedAt,
       changedAt,
       freshness: evidenceAge < ACTIVE_EVIDENCE_MAX_AGE_MS ? "fresh" : "stale",
+      ...(previousError ? { error: previousError } : {}),
     };
   }
   if (
@@ -1317,7 +1502,11 @@ export function applyLifecycle(
       task.activeFlags,
       latestTurn,
     ),
-    ...(latestTurn.error ? { error: latestTurn.error } : {}),
+    ...(latestTurn.error
+      ? { error: latestTurn.error }
+      : previousError
+        ? { error: previousError }
+        : {}),
     updatedAt,
     changedAt,
   };

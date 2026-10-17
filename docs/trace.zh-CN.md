@@ -39,4 +39,6 @@ Authorization: Bearer <token>
 
 limit 必须为 1–1000 的整数；非法参数 422，无记录 404。结果按服务端 SQLite 的持久到达顺序返回，而不是按客户端时间排序；这样客户端时钟偏移、相同时间戳和异步批次不会改变诊断顺序。返回顺序仍不是拓扑排序，必须先按 spanId/parentSpanId 建立关系，再结合设备时钟和异步批次分析。HTTP 接收延迟、outbox 等待和设备离线是不同阶段，不要只相减两个跨设备时间。
 
-排查顺序：任务 status/freshness/error → 当前连接与 outbox → 事件 traceId → poll/RPC/event/upload/http/ingest/reducer 分支。ACTIVE_EVIDENCE_EXPIRED 表示生命周期证据过期，与 Trace 存储失败无关。分享现场前检查本地业务配置和日志是否含秘密。
+桌面 `desktop.poll` 汇总记录线程数、rollout 路径缺失/未找到事件/读取失败/追赶中次数，以及 thread/goal/turns/items 详情 RPC 的分项失败数；只记录计数，不记录会话路径、原始错误或内容。用于区分缺少输入文件、冷启动追赶和局部详情超时。
+
+排查顺序：任务 status/freshness/error → 当前连接与 outbox → `desktop.poll` 的 lifecycle 与详情失败计数 → 事件 traceId → poll/RPC/event/upload/http/ingest/reducer 分支。ACTIVE_EVIDENCE_EXPIRED 表示生命周期证据过期，与 Trace 存储失败无关。分享现场前检查本地业务配置和日志是否含秘密。
