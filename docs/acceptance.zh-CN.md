@@ -8,7 +8,7 @@
 
 现在缓存失效键包括 rollout 路径及最新生命周期回合 ID、时间和状态；rollout 读取失败不会拦截其他数据源。thread、goal、turns、items 详情分别读取，失败字段保留最近成功值并标 stale，仅重试失败字段；不确定的 `notLoaded` 运行态仍按现行规则显示待确认，不将缓存或超时强行标成正在运行。`desktop.poll` 新增 rollout 路径缺失、无生命周期事件、读取/追赶和各详情源失败计数，不包含会话内容、路径或原始错误。未更改协议版本、数据库结构或用户数据。
 
-本地合成回归验证历史线程4小时后重跑会刷新当前inProgress操作并保持stale语义；rollout冷启动追赶不再阻断可用详情；单个Goal读取失败保留其余字段并于后续轮询重试。发布构建时Node全套17个测试文件、82项通过；Node构建、Prettier、文档、隐私、设计合同检查通过。正式服务器以同schema部署，无migration或业务数据写入；部署前SQLite在线备份`integrity_check=ok`，部署后数据库完整性检查为`ok`、服务active、协议v3、Trace exporter失败计数为0。生产只读脚本的health、鉴权、HTTP/WS快照、Trace父节点、参数校验和订阅释放均通过，`businessWrites=0`。
+本地合成回归验证历史线程4小时后重跑会刷新当前inProgress操作并保持stale语义；rollout冷启动追赶不再阻断可用详情；单个Goal读取失败保留其余字段并于后续轮询重试。发布构建时Node全套17个测试文件、82项通过；Node构建、Prettier、文档、隐私、设计合同检查通过。正式服务器以同schema部署，没有migration；部署前SQLite在线备份`integrity_check=ok`，部署后数据库完整性检查为`ok`、服务active、协议v3、Trace exporter失败计数为0。生产只读脚本的health、鉴权、HTTP/WS快照、Trace父节点、参数校验和订阅释放均通过，验收请求前后业务事件计数未变化（`businessWrites=0`）。
 
 Windows 2.0.20安装包公网下载与本地SHA-256、大小一致：112037305字节，`238846daecfd6a0a496e7f97f74cb15ab20a1c97060a54c051d7ffa994c24b61`，Authenticode为`NotSigned`。Android 2.0.19/code22未改代码，复用此前正式签名包并确认与公网SHA-256、大小一致：2204959字节，`595daa2eb93046b74b83c9cc6eac817b84a588ea1186c3f137cc8ef040644958`；本地`apksigner verify`通过。公网联合清单返回`no-store`，两份制品均经HTTPS完整下载校验。安装包未安装到真实用户设备。
 
