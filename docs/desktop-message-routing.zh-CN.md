@@ -4,7 +4,7 @@
 
 ## 数据流与责任
 
-Android → 已认证 WebSocket → 服务端唯一工作站控制器 → Monitor → Codex Desktop 本机 app-tools 管道 → 目标 threadId。Windows 本机发送从同一 Monitor 入口进入。独立 app-server 仅用于读取、状态采集及它自己收到的交互请求，不再创建、恢复或 steer 消息回合。运行中如何排队/steer 由 Desktop 处理，不创建应用业务队列或审批。
+Android → 已认证 WebSocket → 服务端唯一工作站控制器 → Monitor → Codex Desktop 本机 app-tools 管道 → 目标 threadId。Windows 本机发送从同一 Monitor 入口进入。独立 app-server 仅用于读取、状态采集及它自己收到的交互请求，不再创建、恢复或 steer 消息回合。运行中如何排队/steer 由 Desktop 处理，不创建持久化业务队列或审批；服务端仅在工作站短暂重连期间暂存尚未派送的请求，规则见下文。
 
 本机证据为 Codex Desktop 26.908.4834.0 随附 codex-app-tools/server.mjs 及实测 tools/list。它是随 Desktop 分发的本机接口，非公开稳定 API；上线验收必须验证实际 Desktop 版本。本轮未向真实会话发送测试消息；只读连接验证与合成回归不能代替实际消息接收验收。
 
@@ -20,7 +20,9 @@ tools/call 参数为 namespace、tool、arguments、callId、threadId、turnId�
 
 ## 控制通道就绪与状态
 
-Desktop 完成 `auth`、`subscribe` 后发送 `role=desktop`。服务端只有在接受唯一工作站控制器登记时才返回 `desktop.ready`；收到该确认前，Windows 不把手机消息转发显示为可用。第二个控制端仍被拒绝。控制连接每15秒发送一次WebSocket心跳，10秒未收到Pong即关闭当前连接，按1–6秒退避重新认证、订阅和登记；重连期间不重放已经发出的消息。
+Desktop 完成 `auth`、`subscribe` 后发送 `role=desktop`。服务端只有在接受唯一工作站控制器登记时才返回 `desktop.ready`；收到该确认前，Windows 不把手机消息转发显示为可用。第二个控制端仍被拒绝。控制连接每15秒发送一次WebSocket心跳，10秒未收到Pong即关闭当前连接，按1–6秒退避重新认证、订阅和登记。
+
+手机发送消息或读取详情时若服务端暂时找不到可用控制器，请求在内存中等待7秒期限，以覆盖桌面重连退避的6秒上限；共享请求管理器每1秒扫描一次，实际超时响应可能晚一个扫描周期，事件循环拥塞时还会延迟。控制端重新完成登记后，服务端只派送一次；手机连接在派送前关闭则取消请求，超时返回“工作站未连接”。等待项与已派送请求共用256项总上限。请求派送后仍按原规则等待最多30秒回执；控制端在派送后断开时，结果视为未确认，不转发给重连后的控制端，不自动重发。
 
 采集同步状态与手机消息控制通道状态独立展示。`workstation.status.ready` 只表示本机 app-server 已初始化，不能代替 `desktop.ready`。Android 只在收到与自身 `requestId`、`threadId` 匹配的 `result` 后结束发送等待；120秒无回执只显示结果未确认，保留草稿且不自动重发。
 

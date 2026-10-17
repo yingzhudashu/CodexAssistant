@@ -25,6 +25,8 @@ import type { TaskDatabase } from "./database.js";
 import type { ServerTracing } from "./tracing.js";
 const API = "/codex-assistant/api/v3";
 const MAX_REPLAY_EVENTS = 500;
+// 桌面端断线后按1–6秒退避重连；为当前尚未派送的手机请求留一个重连窗口。
+const WORKSTATION_RECONNECT_GRACE_MS = 7_000;
 function decodeJson(input: unknown): unknown | undefined {
   const text = Buffer.isBuffer(input)
     ? input.toString("utf8")
@@ -75,6 +77,20 @@ export async function registerStream(
       deadline: number;
     }
   >();
+  const waitingRequests = new Map<
+    string,
+    {
+      target: WebSocket;
+      request:
+        | import("@codex-assistant/protocol").ClientDetailMessage
+        | import("@codex-assistant/protocol").ClientSendMessage;
+      deadline: number;
+    }
+  >();
+  const findDesktopController = (): WebSocket | undefined =>
+    [...desktopControllers].find(
+      (peer) => peer.readyState === 1 && peer.bufferedAmount < 256 * 1024,
+    );
   const interactionResults = new Map<
     string,
     import("@codex-assistant/protocol").InteractionResult
@@ -111,8 +127,50 @@ export async function registerStream(
           }),
         );
       }
+    for (const [requestId, waiting] of waitingRequests) {
+      if (waiting.target.readyState !== 1) {
+        waitingRequests.delete(requestId);
+      } else if (waiting.deadline <= Date.now()) {
+        waitingRequests.delete(requestId);
+        sendSocket(
+          waiting.target,
+          JSON.stringify({
+            type: "result",
+            protocolVersion: PROTOCOL_VERSION,
+            requestId,
+            threadId: waiting.request.threadId,
+            status: "failed",
+            error: "工作站未连接",
+          }),
+        );
+      }
+    }
+    const controller = findDesktopController();
+    if (controller) forwardWaitingRequests(controller);
   }, 1000);
   expiry.unref();
+  const forwardWaitingRequests = (controller: WebSocket): void => {
+    for (const [requestId, waiting] of waitingRequests) {
+      if (
+        controller.readyState !== 1 ||
+        controller.bufferedAmount >= 256 * 1024
+      )
+        return;
+      if (waiting.target.readyState !== 1) {
+        waitingRequests.delete(requestId);
+        continue;
+      }
+      if (waiting.deadline <= Date.now()) continue;
+      if (!sendSocket(controller, JSON.stringify(waiting.request))) return;
+      waitingRequests.delete(requestId);
+      pendingRequests.set(requestId, {
+        target: waiting.target,
+        controller,
+        threadId: waiting.request.threadId,
+        deadline: Date.now() + 30_000,
+      });
+    }
+  };
   const broadcast = (event: ServerEvent): void => {
     const message: EventMessage = {
       type: "event",
@@ -180,13 +238,18 @@ export async function registerStream(
               "Only one workstation controller is supported",
             );
           desktopControllers.add(socket);
-          sendSocket(
-            socket,
+          // 首个snapshot可能自然超过实时消息背压阈值；ready排在snapshot之后，
+          // 不能因此关闭健康的桌面控制通道。后续工作请求仍按缓冲量限流。
+          socket.send(
             JSON.stringify({
               type: "desktop.ready",
               protocolVersion: PROTOCOL_VERSION,
             }),
+            (error) => {
+              if (error) socket.terminate();
+            },
           );
+          forwardWaitingRequests(socket);
           return;
         }
         if (desktopControllers.has(socket)) {
@@ -342,11 +405,8 @@ export async function registerStream(
         }
         if (detail || send) {
           const requestId = detail?.requestId ?? send?.requestId;
-          const controller = [...desktopControllers].find(
-            (peer) => peer.readyState === 1 && peer.bufferedAmount < 256 * 1024,
-          );
           const request = detail ?? send!;
-          if (!controller || !requestId) {
+          if (!requestId) {
             sendSocket(
               socket,
               JSON.stringify({
@@ -360,9 +420,9 @@ export async function registerStream(
             );
             return;
           }
-          if (pendingRequests.has(requestId))
+          if (pendingRequests.has(requestId) || waitingRequests.has(requestId))
             return reject("validation_failed", "Duplicate control request id");
-          if (pendingRequests.size >= 256) {
+          if (pendingRequests.size + waitingRequests.size >= 256) {
             sendSocket(
               socket,
               JSON.stringify({
@@ -376,13 +436,22 @@ export async function registerStream(
             );
             return;
           }
-          pendingRequests.set(requestId, {
-            target: socket,
-            controller,
-            threadId: request.threadId,
-            deadline: Date.now() + 30_000,
-          });
-          sendSocket(controller, JSON.stringify(payload));
+          const controller = findDesktopController();
+          if (controller && sendSocket(controller, JSON.stringify(request))) {
+            pendingRequests.set(requestId, {
+              target: socket,
+              controller,
+              threadId: request.threadId,
+              deadline: Date.now() + 30_000,
+            });
+          } else {
+            // 只暂存尚未派送的请求；手机离线即取消，控制端恢复后至多派送一次。
+            waitingRequests.set(requestId, {
+              target: socket,
+              request,
+              deadline: Date.now() + WORKSTATION_RECONNECT_GRACE_MS,
+            });
+          }
           return;
         }
         return reject("validation_failed", "Unsupported control message");
@@ -468,6 +537,8 @@ export async function registerStream(
         if (pending.target === socket || pending.controller === socket)
           pendingRequests.delete(requestId);
       }
+      for (const [requestId, waiting] of waitingRequests)
+        if (waiting.target === socket) waitingRequests.delete(requestId);
       for (const [requestId, entry] of interactions)
         if (entry.controller === socket) {
           interactions.delete(requestId);
@@ -504,6 +575,7 @@ export async function registerStream(
       pendingRequests.clear();
       interactions.clear();
       interactionResults.clear();
+      waitingRequests.clear();
       subscribers.clear();
       desktopControllers.clear();
     },

@@ -78,7 +78,14 @@ it('rejects a cross-thread result instead of delivering it to another conversati
 it('returns a correlated offline error without closing the phone connection', async () => {
   const f = await fixture(); const phone = await f.connect();
   phone.send({ type: 'send', requestId: 'offline-1', threadId: 'thread-1', text: 'continue' });
-  await vi.waitFor(() => expect(phone.messages).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'offline-1', threadId: 'thread-1', status: 'failed' })));
+  await new Promise(resolve => setTimeout(resolve, 25));
+  expect(phone.messages.some(m => m.type === 'result' && m.requestId === 'offline-1')).toBe(false);
+  const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 8_000);
+  try {
+    await vi.waitFor(() => expect(phone.messages).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'offline-1', threadId: 'thread-1', status: 'failed', error: '工作站未连接' })));
+  } finally {
+    now.mockRestore();
+  }
   expect(phone.socket.readyState).toBe(WebSocket.OPEN);
 });
 
