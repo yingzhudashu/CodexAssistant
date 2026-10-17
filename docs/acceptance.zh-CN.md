@@ -12,7 +12,7 @@
 
 Windows 2.0.20安装包公网下载与本地SHA-256、大小一致：112037305字节，`238846daecfd6a0a496e7f97f74cb15ab20a1c97060a54c051d7ffa994c24b61`，Authenticode为`NotSigned`。Android 2.0.19/code22未改代码，复用此前正式签名包并确认与公网SHA-256、大小一致：2204959字节，`595daa2eb93046b74b83c9cc6eac817b84a588ea1186c3f137cc8ef040644958`；本地`apksigner verify`通过。公网联合清单返回`no-store`，两份制品均经HTTPS完整下载校验。安装包未安装到真实用户设备。
 
-没有问题现场Trace/rollout样本，生产只读检查也不启动真实Codex会话，因此不能断言每次用户故障都是这两条代码路径，或证明现场采集现象已在用户会话中消失。Linux服务和公网发布已实测；真实Windows覆盖安装、Android物理设备运行、现场历史会话复采、GitHub推送仍未完成/验证。GitHub推送受本机至github.com的HTTPS与SSH连接超时阻塞，提交保留在本地，未改写远端历史。
+没有问题现场Trace/rollout样本，生产只读检查也不启动真实Codex会话，因此不能断言每次用户故障都是这两条代码路径，或证明现场采集现象已在用户会话中消失。Linux服务和公网发布已实测；真实Windows覆盖安装、Android物理设备运行、现场历史会话复采仍未验证。此前 GitHub 网络失败已于2026-10-18恢复，提交`e74a2f2`与`9de45b0`已推送至`origin/master`，并确认远端与本地`master`同步（ahead/behind均为0）；本轮没有创建GitHub Release，公开Release仍为`v2.0.17`。
 
 ## 2026-10-17 工作站控制通道重连窗口修复（已部署；手机实测未完成）
 
