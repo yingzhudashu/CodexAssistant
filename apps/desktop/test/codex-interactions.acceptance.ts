@@ -7,11 +7,11 @@ import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DESKTOP_HOST_UNAVAILABLE_MESSAGE, Monitor } from '../src/monitor.js';
 
-const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, response: vi.fn(), hostError: undefined as Error | undefined, hostSend: vi.fn(), controlStatus: vi.fn() }));
+const state = vi.hoisted(() => ({ request: undefined as any, notification: undefined as any, socket: undefined as any, startGate: undefined as Promise<void> | undefined, response: vi.fn(), hostError: undefined as Error | undefined, hostSend: vi.fn(), controlStatus: vi.fn() }));
 vi.mock('../src/app-server.js', () => ({ CodexAppServer: class {
   constructor(options: any) { state.request = options.onRequest; state.notification = options.onNotification; }
   get ready() { return true; }
-  async start() {} async stop() {} setTraceContext() {}
+  async start() { await state.startGate; } async stop() {} setTraceContext() {}
   async listThreads() { return []; }
   respond(id: number | string, result: unknown) { state.response(id, result); }
 } }));
@@ -24,7 +24,7 @@ vi.mock('ws', () => ({ default: class extends EventEmitter {
   terminate() { this.readyState = 3; this.emit('close'); }
 } }));
 const cleanup: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const f of cleanup.splice(0)) await f(); vi.unstubAllGlobals(); state.response.mockReset(); state.hostSend.mockReset(); state.hostError = undefined; });
+afterEach(async () => { for (const f of cleanup.splice(0)) await f(); vi.unstubAllGlobals(); state.response.mockReset(); state.hostSend.mockReset(); state.hostError = undefined; state.startGate = undefined; });
 async function fixture(withReady = true) {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200 })));
   const directory = await mkdtemp(join(tmpdir(), 'codex-interaction-audit-'));
@@ -109,6 +109,31 @@ it('accepts a message while a local app-server reports an active turn', async ()
   socket.emit('message', JSON.stringify({ type: 'send', requestId: 'host-active', threadId: 'thread-1', text: 'continue' }));
   await vi.waitFor(() => expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'host-active', status: 'started' })));
   expect(state.hostSend).toHaveBeenCalledWith('thread-1', 'continue');
+});
+
+it('registers the mobile relay and accepts a message while app-server initialization is pending', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200 })));
+  const directory = await mkdtemp(join(tmpdir(), 'codex-relay-startup-'));
+  let release!: () => void;
+  state.startGate = new Promise<void>(resolve => { release = resolve; });
+  state.controlStatus.mockReset();
+  const monitor = await Monitor.create({ stateDirectory: directory, apiUrl: 'http://127.0.0.1:3240', token: 'synthetic-test-token', deviceId: 'test-device', onTasks() {}, onControlStatus: state.controlStatus, desktopHost: { sendMessage: async (threadId, prompt) => { state.hostSend(threadId, prompt); } } });
+  cleanup.push(async () => { await monitor.stop(); await rm(directory, { recursive: true, force: true }); });
+  let starting: Promise<void> | undefined;
+  try {
+    starting = monitor.start();
+    await vi.waitFor(() => expect(state.socket).toBeDefined());
+    const socket = state.socket;
+    socket.emit('message', JSON.stringify({ type: 'authenticated' }));
+    socket.emit('message', JSON.stringify({ type: 'desktop.ready', protocolVersion: 'codex-assistant.v3' }));
+    expect(state.controlStatus).toHaveBeenLastCalledWith(true);
+    socket.emit('message', JSON.stringify({ type: 'send', requestId: 'during-startup', threadId: 'thread-1', text: 'continue' }));
+    await vi.waitFor(() => expect(state.hostSend).toHaveBeenCalledWith('thread-1', 'continue'));
+    expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'result', requestId: 'during-startup', status: 'started' }));
+  } finally {
+    release();
+    await starting;
+  }
 });
 
 it('redacts an unavailable Desktop host and keeps the original thread identifier private', async () => {

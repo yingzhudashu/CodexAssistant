@@ -5,10 +5,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 import uiautomator2 as u2
 
 ADB = str(pathlib.Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/platform-tools/adb.exe')
+SERIAL = os.environ.get('ANDROID_SERIAL')
+if not SERIAL:
+    raise RuntimeError('Set ANDROID_SERIAL to the dedicated acceptance emulator.')
 OUT = ROOT / 'artifacts/network-recovery'
 OUT.mkdir(parents=True, exist_ok=True)
 def adb(*args):
-    return subprocess.check_output([ADB, '-s', 'emulator-5580', *args], timeout=25).decode().strip()
+    return subprocess.check_output([ADB, '-s', SERIAL, *args], timeout=25).decode().strip()
 def metrics():
     with urllib.request.urlopen('http://127.0.0.1:33241/acceptance/network', timeout=2) as r:
         return json.load(r)
@@ -23,7 +26,7 @@ def foreground():
     time.sleep(.5)
     adb('shell','am','start','-n','site.codexassistant/.MainActivity')
 
-d=u2.connect('emulator-5580')
+d=u2.connect(SERIAL)
 report={'completed':False,'foreground':[],'network':[],'limitations':['emulator only; no OEM/physical-device coverage']}
 wifi=adb('shell','settings','get','global','wifi_on')
 data=adb('shell','settings','get','global','mobile_data')

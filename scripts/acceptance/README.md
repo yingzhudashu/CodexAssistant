@@ -1,6 +1,6 @@
 # 隔离验收脚本
 
-本地命令在仓库根目录执行。合成测试使用临时 SQLite、占位 Token 和专用 emulator-5580；不连接生产、不操作其他手机。生产只读检查单独列在下方，不进入默认测试命令。可再生报告写入 artifacts/acceptance（网络脚本使用 artifacts/network-recovery）；运行 npm run clean 会清理列明的报告和历史过程目录，但保留混有发行解包与私有交付材料的 artifacts 主验收目录。
+本地命令在仓库根目录执行。合成测试使用临时 SQLite、占位 Token 和明确指定的专用 Android 模拟器；设置 `ANDROID_SERIAL` 后脚本只对该设备运行，不连接生产、不操作其他手机。生产只读检查单独列在下方，不进入默认测试命令。可再生报告写入 artifacts/acceptance（网络脚本使用 artifacts/network-recovery）；运行 npm run clean 会清理列明的报告和历史过程目录，但保留混有发行解包与私有交付材料的 artifacts 主验收目录。
 
 ## 自动质量检查
 
@@ -24,7 +24,7 @@ Electron真实renderer使用合成IPC验证，不向真实Desktop写消息。持
 
 ## Android模拟器
 
-先构建Debug APK。启动独立AVD并设置`ANDROID_SERIAL`为本次设备序列号；所有ADB命令必须带该序列号。默认为历史专用设备`emulator-5580`。端口33241供ui-server、network-recovery-server、official-android互斥使用。
+先构建Debug APK。启动独立AVD并设置`ANDROID_SERIAL`为本次设备序列号；所有ADB命令必须带该序列号。脚本不猜测设备名，不会默认操作已连接设备。端口33241供ui-server、network-recovery-server、official-android互斥使用。
 
 ```powershell
 python -m venv "$env:TEMP\codexassistant-acceptance-venv"
@@ -50,6 +50,6 @@ node --import tsx scripts/acceptance/ui-server.ts
 
 ## Android后台通知
 
-停止其他33241端口夹具，运行 `node --import tsx scripts/acceptance/notifications-server.ts`，在专用emulator-5580安装Debug包并配置回环地址与合成Token，再执行 `python scripts/acceptance/android-notifications.py`。脚本等待实际前台服务及初始快照，再检查系统活动通知记录中的最新标题，覆盖12次后台变化、重连补报、40次突发事件、授予电池豁免后的强制休眠、唤醒恢复和短时CPU锁释放。记录总耗时包含ADB轮询，不等于纯应用耗时；Trace只测到系统API调用结束。
+停止其他33241端口夹具，运行 `node --import tsx scripts/acceptance/notifications-server.ts`，在专用模拟器安装Debug包并配置回环地址与合成Token；显式设置 `ANDROID_SERIAL` 为该设备序列号后执行 `python scripts/acceptance/android-notifications.py`。脚本等待实际前台服务及初始快照，再检查系统活动通知记录中的最新标题，覆盖12次后台变化、重连补报、40次突发事件、授予电池豁免后的强制休眠、唤醒恢复和短时CPU锁释放。记录总耗时包含ADB轮询，不等于纯应用耗时；Trace只测到系统API调用结束。
 
 仅对专用模拟器临时改变deviceidle白名单、休眠和电池状态，finally恢复；不操作物理手机。通知声音以构造参数和系统状态检查为主，实际音量/勿扰/厂商行为需要真机确认。Release包另外检查首次启动、连接表单、设置和specialUse服务启动；业务通知链路在合成Debug环境测试。

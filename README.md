@@ -2,11 +2,11 @@
 
 Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和 HTTPS 上传，由 Fastify/SQLite 服务保存，再以 WebSocket 同步给 Android。Windows 和 Android 均支持执行计划、按需回合摘要、消息发送、结构化交互、连接设置及主题切换。
 
-发布状态：**已发布**。正式服务器客户端清单已发布 Windows **2.0.20**、Android **2.0.19**（Android versionCode **22**）；GitHub公开Release仍为 **v2.0.17**。协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。服务器部署参数和操作记录保存在仓库外。
+发布状态：**已发布**。正式服务器客户端清单已更新为 Windows **2.0.21**、Android **2.0.20**（Android versionCode **23**）；GitHub公开Release仍为 **v2.0.17**。协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。服务器部署参数和操作记录保存在仓库外。
 
-GitHub公开下载仍为 **Releases → v2.0.17 → Assets**：`CodexAssistant-2.0.17.exe`（Windows x64，未签名）、`CodexAssistant-2.0.17.apk`（Android Release签名）及 `SHA256SUMS.txt`。正式服务器清单提供 `CodexAssistant-2.0.20.exe` 与 `CodexAssistant-2.0.19.apk`。配置正式服务器的客户端可通过应用内更新读取该清单。公开安装包不预置服务器地址，首次使用需填写HTTPS根地址和Token。发布步骤见[构建与发布](docs/release.zh-CN.md)，验证范围见[验收记录](docs/acceptance.zh-CN.md)。
+GitHub公开下载仍为 **Releases → v2.0.17 → Assets**：`CodexAssistant-2.0.17.exe`（Windows x64，未签名）、`CodexAssistant-2.0.17.apk`（Android Release签名）及 `SHA256SUMS.txt`。正式服务器清单提供 `CodexAssistant-2.0.21.exe` 与 `CodexAssistant-2.0.20.apk`。配置正式服务器的客户端可通过应用内更新读取该清单。公开安装包不预置服务器地址，首次使用需填写HTTPS根地址和Token。发布步骤见[构建与发布](docs/release.zh-CN.md)，验证范围见[验收记录](docs/acceptance.zh-CN.md)。
 
-Windows 2.0.20包含历史会话采集与缓存状态修复；Android 2.0.19包含性能、Trace、桌面消息状态校准和安卓后台通知恢复修复。Android安装后在设置→通知检查通知权限和“允许后台持续连接”。Windows安装器未签名；升级前退出旧客户端并保留本地连接及outbox。详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
+Windows 2.0.21和Android 2.0.20/code23包含本轮工作站登记、历史运行态投影、Android发送回执竞态及验收流程修复；此前的后台通知恢复修复也包含在Android版本中。Android安装后在设置→通知检查通知权限和“允许后台持续连接”。Windows安装器未签名；升级前退出旧客户端并保留本地连接及outbox。详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
 
 ## 使用边界
 
@@ -43,7 +43,7 @@ cd android
 
 Kotlin格式化使用Gradle维护工具 `formatKotlin` / `checkKotlinFormat`（ktfmt 0.64），不进入APK；TS/JS/CSS/HTML使用Prettier。
 
-模拟器通过 `adb -s emulator-5580 reverse tcp:33241 tcp:33241` 访问隔离验收服务，地址 `http://127.0.0.1:33241`。不得把真实会话或用户手机作为默认自动测试目标。
+专用模拟器通过 `adb -s $env:ANDROID_SERIAL reverse tcp:33241 tcp:33241` 访问隔离验收服务，地址 `http://127.0.0.1:33241`。先显式设置 `ANDROID_SERIAL`，不得把真实会话或用户手机作为默认自动测试目标。
 
 ## 项目结构与质量入口
 

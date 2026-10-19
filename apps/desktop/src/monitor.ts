@@ -297,8 +297,10 @@ export class Monitor {
 
   async start(): Promise<void> {
     this.#onStatus("connecting");
-    await this.#server.start();
+    // 手机控制通道不依赖本地 app-server 的初始化；先登记工作站，
+    // 避免冷启动或 app-server 初始化变慢时手机请求被误判为工作站离线。
     this.#connectControl();
+    await this.#server.start();
     await this.#poll();
     if (!this.#stopping)
       this.#timer = setInterval(() => void this.#poll(), 2_000);
@@ -1417,14 +1419,19 @@ export function deviceIdFromInstall(seed: string): string {
   return createHash("sha256").update(seed).digest("hex").slice(0, 32);
 }
 
-/** 保留独立 RPC 的官方运行态；本机生命周期只修正最近回合，不能伪造 active flags。 */
+/** 保留官方活动/错误状态和交互标志；本机生命周期只修正 idle/notLoaded 的最近回合。 */
 export function applyLifecycle(
   task: TaskSnapshot,
   lifecycle?: Lifecycle,
   now = Date.now(),
   hasInProgressItem = false,
 ): TaskSnapshot {
-  if (task.runtimeStatus !== "notLoaded") return task;
+  if (
+    task.runtimeStatus === "active" ||
+    task.runtimeStatus === "systemError" ||
+    task.activeFlags.length > 0
+  )
+    return task;
   if (!lifecycle) {
     if (task.status !== "running") return task;
     return {

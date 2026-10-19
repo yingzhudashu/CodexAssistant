@@ -96,6 +96,7 @@ it("keeps a silent turn active while its current operation remains in progress",
   const lifecycle = { turnId: "turn-1", turn: { status: "inProgress" as const }, updatedAt: baseTask.updatedAt, evidenceAt: baseTask.updatedAt };
   const now = Date.parse(lifecycle.evidenceAt) + ACTIVE_EVIDENCE_MAX_AGE_MS + 1;
   expect(applyLifecycle(baseTask, lifecycle, now, true)).toMatchObject({ status: "running", freshness: "stale", latestTurn: { status: "inProgress" } });
+  expect(applyLifecycle({ ...baseTask, runtimeStatus: "idle" }, lifecycle, now, true)).toMatchObject({ status: "running", freshness: "stale", latestTurn: { status: "inProgress" } });
   const paused = { ...baseTask, goal: { objective: "Goal", status: "needs_action" as const, tokensUsed: 0, timeUsedSeconds: 0 } };
   expect(applyLifecycle(paused, lifecycle, now, true).status).toBe("needs_action");
   expect(applyLifecycle(baseTask, lifecycle, Date.parse(lifecycle.evidenceAt) + IN_PROGRESS_ITEM_MAX_AGE_MS, true).status).toBe("needs_action");

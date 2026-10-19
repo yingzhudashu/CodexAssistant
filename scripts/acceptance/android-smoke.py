@@ -1,10 +1,13 @@
-"""专用 emulator-5580 的合成界面验收；需先启动 ui-server.ts。"""
+"""指定 Android 模拟器的合成界面验收；需先启动 ui-server.ts。"""
 import json, pathlib, time
 import os
 import uiautomator2 as u2
 out = pathlib.Path(__file__).resolve().parents[2] / 'artifacts/acceptance'
 out.mkdir(parents=True, exist_ok=True)
-d = u2.connect(os.environ.get('ANDROID_SERIAL', 'emulator-5580'))
+SERIAL = os.environ.get('ANDROID_SERIAL')
+if not SERIAL:
+    raise RuntimeError('Set ANDROID_SERIAL to the dedicated acceptance emulator.')
+d = u2.connect(SERIAL)
 report = {}
 
 def dismiss_system_dialog():
@@ -41,7 +44,7 @@ def scroll_to(text):
     if not target.wait(timeout=2):
         scroller = d(scrollable=True)[-1]
         assert scroller.exists, f'no scroll container for {text}'
-        scroller.scroll.toEnd(max_swipes=8)
+        scroller.scroll.toEnd(max_swipes=20)
     assert target.wait(timeout=10), text
 def edit_connection():
     """将当前应用指向本轮 UI 合成服务；兼容首次安装和已有配置。"""
@@ -97,8 +100,14 @@ try:
     message = fields[-1]
     message.set_text('synthetic-message')
     # 消息输入框位于详情滚动区域底部；按 Compose 可访问按钮的唯一文字匹配提交。
-    scroll_to('发送')
-    send_button = d(text='发送消息')[-1]
+    # 页面顶部也有“发送消息”标签；先把详情滚动到编辑器底部，
+    # 否则无障碍树会命中标题而不是实际发送按钮。先收起输入法，避免按钮被键盘遮挡。
+    ime = d.shell('dumpsys input_method').output
+    if 'mInputShown=true' in ime or 'mShowRequested=true' in ime:
+        d.press('back')
+        assert d(text='返回任务列表').wait(timeout=5), 'detail page closed while hiding IME'
+    d(scrollable=True)[-1].scroll.toEnd(max_swipes=20)
+    send_button = d(text='发送消息')[2]
     assert send_button.exists, 'message send action'
     send_button.click()
     scroll_to('Codex Desktop 已接受消息')

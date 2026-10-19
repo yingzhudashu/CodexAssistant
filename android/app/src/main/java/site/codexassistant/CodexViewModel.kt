@@ -8,6 +8,30 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
+internal fun projectSendReceipts(state: TaskState, incoming: Collection<ResultMessage>): TaskState {
+    var next = state
+    incoming
+        .groupBy { it.threadId }
+        .values
+        .forEach { receipts ->
+            val result = receipts.last()
+            if (next.sending[result.threadId] == result.requestId) {
+                next =
+                    next.copy(
+                        results = next.results + (result.threadId to result),
+                        sending = next.sending - result.threadId,
+                    )
+            } else if (
+                next.sending[result.threadId] == null ||
+                    next.results[result.threadId]?.requestId == result.requestId
+            ) {
+                // 在途新请求存在时忽略旧 requestId；新请求的早到回执通过无 sending 状态保留。
+                next = next.copy(results = next.results + (result.threadId to result))
+            }
+        }
+    return next
+}
+
 class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
     private val _state = MutableStateFlow(TaskState())
     val state = _state.asStateFlow()
@@ -58,14 +82,11 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
                         detailRequests.remove(thread)
                     }
                 }
-                incoming.results.values.forEach { result ->
-                    if (next.sending[result.threadId] == result.requestId) {
-                        next =
-                            next.copy(
-                                results = next.results + (result.threadId to result),
-                                sending = next.sending - result.threadId,
-                            )
-                    }
+                // Repository 有界保留多条历史回执；每个线程仅投影最新回执。
+                val latestResults =
+                    incoming.results.values.groupBy { it.threadId }.values.map { it.last() }
+                next = projectSendReceipts(next, incoming.results.values)
+                latestResults.forEach { result ->
                     val pending = detailRequests[result.threadId]
                     if (pending?.first == result.requestId && result.status == "failed") {
                         detailRequests.remove(result.threadId)
@@ -152,8 +173,12 @@ class CodexViewModel(private val coordinator: SyncCoordinator) : ViewModel() {
             val id = coordinator.sendMessage(threadId, text)
             _state.value =
                 _state.value.copy(
-                    sending = _state.value.sending + (threadId to id),
-                    results = _state.value.results - threadId,
+                    sending =
+                        if (_state.value.results[threadId]?.requestId == id) _state.value.sending
+                        else _state.value.sending + (threadId to id),
+                    results =
+                        if (_state.value.results[threadId]?.requestId == id) _state.value.results
+                        else _state.value.results - threadId,
                 )
             viewModelScope.launch {
                 delay(120000)

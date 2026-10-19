@@ -14,7 +14,7 @@ android {
     namespace = "site.codexassistant"
     compileSdk = 35
     defaultConfig {
-        applicationId = "site.codexassistant"; minSdk = 26; targetSdk = 35; versionCode = 22; versionName = "2.0.19"
+        applicationId = "site.codexassistant"; minSdk = 26; targetSdk = 35; versionCode = 23; versionName = "2.0.20"
     }
     signingConfigs {
         create("release") {

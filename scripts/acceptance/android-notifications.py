@@ -1,4 +1,4 @@
-"""专用emulator-5580通知验收：使用合成任务，恢复电池/休眠设置，不操作真实设备。"""
+"""在显式指定的专用模拟器上验收通知；使用合成任务并恢复设备电源设置。"""
 import json
 import os
 import pathlib
@@ -8,13 +8,14 @@ import time
 import urllib.request
 
 ADB = str(pathlib.Path(os.environ['LOCALAPPDATA']) / 'Android/Sdk/platform-tools/adb.exe')
+SERIAL = os.environ['ANDROID_SERIAL']
 PACKAGE = 'site.codexassistant'
 BASE = 'http://127.0.0.1:33241'
 OUT = pathlib.Path(__file__).resolve().parents[2] / 'artifacts/acceptance/android-notifications.json'
 LABELS = {'running': '进行中', 'completed': '已完成', 'needs_action': '待确认', 'failed': '失败'}
 
 def shell(*args):
-    return subprocess.check_output([ADB, '-s', 'emulator-5580', 'shell', *args], encoding='utf-8', errors='replace', timeout=15)
+    return subprocess.check_output([ADB, '-s', SERIAL, 'shell', *args], encoding='utf-8', errors='replace', timeout=15)
 
 def api(path, data=None):
     req = urllib.request.Request(BASE + path, data=json.dumps(data).encode() if data is not None else None,
