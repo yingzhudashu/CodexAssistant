@@ -1451,29 +1451,28 @@ export function applyLifecycle(
     Date.parse(task.updatedAt) > Date.parse(lifecycle.updatedAt)
       ? task.updatedAt
       : lifecycle.updatedAt;
-  // 对话或元数据继续更新不应改变“进入当前回合状态”的时间。Goal 优先时保留 Goal 的时间。
-  const changedAt = task.goal ? task.changedAt : lifecycle.updatedAt;
   // 文件写入时间只是一种有界活动证据，不是进程存活证明。容许文件时钟的亚秒精度差，
   // 超过一秒的未来时间视为异常，不能无限续期。
-  // 明确的完成/中止事件不需要续期；Goal 的暂停、阻塞、完成等仍保留原有优先级。
+  // 明确的完成/中止事件不需要续期；活动证据过期后再恢复 Goal 的非运行状态优先级。
   const evidenceAge = now - evidenceTime;
-  if (
+  const currentActivityEvidence =
     latestTurn.status === "inProgress" &&
-    hasInProgressItem &&
     Number.isFinite(evidenceTime) &&
     evidenceTime <= now + 1_000 &&
-    evidenceAge < IN_PROGRESS_ITEM_MAX_AGE_MS
-  ) {
-    const status = deriveTaskStatus(
-      task.goal?.status,
-      task.runtimeStatus,
-      task.activeFlags,
-      latestTurn,
-    );
+    (evidenceAge < ACTIVE_EVIDENCE_MAX_AGE_MS ||
+      (hasInProgressItem && evidenceAge < IN_PROGRESS_ITEM_MAX_AGE_MS));
+  // 对话或元数据继续更新不应改变“进入当前回合状态”的时间；新的活动回合以其事件时间为准。
+  const changedAt =
+    currentActivityEvidence || !task.goal
+      ? lifecycle.updatedAt
+      : task.changedAt;
+  if (currentActivityEvidence) {
+    // Goal 是目标记录，不是当前进程的心跳。旧 Goal（如 completed）不能遮蔽
+    // 当前回合的有效开始/操作证据；Goal 字段本身仍保留源值，不在此伪造更新。
     return {
       ...base,
       latestTurn,
-      status,
+      status: "running",
       updatedAt,
       changedAt,
       freshness: evidenceAge < ACTIVE_EVIDENCE_MAX_AGE_MS ? "fresh" : "stale",

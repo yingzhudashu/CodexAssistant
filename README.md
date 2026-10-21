@@ -2,11 +2,11 @@
 
 Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和 HTTPS 上传，由 Fastify/SQLite 服务保存，再以 WebSocket 同步给 Android。Windows 和 Android 均支持执行计划、按需回合摘要、消息发送、结构化交互、连接设置及主题切换。
 
-发布状态：**已发布**。正式服务器客户端清单已更新为 Windows **2.0.21**、Android **2.0.20**（Android versionCode **23**）；GitHub公开Release仍为 **v2.0.17**。协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。服务器部署参数和操作记录保存在仓库外。
+发布状态：**已发布**。正式服务器客户端清单已更新为 Windows **2.0.22**、Android **2.0.20**（Android versionCode **23**）；GitHub公开Release仍为 **v2.0.17**。协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。服务器部署参数和操作记录保存在仓库外。
 
-GitHub公开下载仍为 **Releases → v2.0.17 → Assets**：`CodexAssistant-2.0.17.exe`（Windows x64，未签名）、`CodexAssistant-2.0.17.apk`（Android Release签名）及 `SHA256SUMS.txt`。正式服务器清单提供 `CodexAssistant-2.0.21.exe` 与 `CodexAssistant-2.0.20.apk`。配置正式服务器的客户端可通过应用内更新读取该清单。公开安装包不预置服务器地址，首次使用需填写HTTPS根地址和Token。发布步骤见[构建与发布](docs/release.zh-CN.md)，验证范围见[验收记录](docs/acceptance.zh-CN.md)。
+GitHub公开下载仍为 **Releases → v2.0.17 → Assets**：`CodexAssistant-2.0.17.exe`（Windows x64，未签名）、`CodexAssistant-2.0.17.apk`（Android Release签名）及 `SHA256SUMS.txt`。正式服务器清单提供 `CodexAssistant-2.0.22.exe` 与 `CodexAssistant-2.0.20.apk`。配置正式服务器的客户端可通过应用内更新读取该清单。公开安装包不预置服务器地址，首次使用需填写HTTPS根地址和Token。发布步骤见[构建与发布](docs/release.zh-CN.md)，验证范围见[验收记录](docs/acceptance.zh-CN.md)。
 
-Windows 2.0.21和Android 2.0.20/code23包含本轮工作站登记、历史运行态投影、Android发送回执竞态及验收流程修复；此前的后台通知恢复修复也包含在Android版本中。Android安装后在设置→通知检查通知权限和“允许后台持续连接”。Windows安装器未签名；升级前退出旧客户端并保留本地连接及outbox。详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
+Windows 2.0.22包含本轮历史会话运行态投影修复。Android 2.0.20/code23 的源码本轮未变，继续提供此前已发布的工作站连接、发送回执和后台通知修复。Android安装后在设置→通知检查通知权限和“允许后台持续连接”。Windows安装器未签名；升级前退出旧客户端并保留本地连接及outbox。详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
 
 ## 使用边界
 

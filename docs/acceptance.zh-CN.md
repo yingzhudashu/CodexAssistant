@@ -1,5 +1,13 @@
 # 当前审查与验收
 
+## 2026-10-21 历史会话运行态修复发布（正式环境）
+
+本地修复将 Windows 客户端版本提升为 `2.0.22`；Android 源码未变化，继续使用 `2.0.20/code23`。Node 全套 17 个测试文件、84 项通过，Node 构建、Electron smoke（所有报告项通过，`errors=[]`）、Prettier、文档、隐私和设计合同检查通过。Windows 安装器为 112,037,338 字节，SHA-256 `e3de8d229d86702562c24c30901d714e5539aca3c79d6eab440fad75babd875e`，Authenticode 为 `NotSigned`。Android 既有 Release APK 未改写，2,204,955 字节，SHA-256 `3ff9ea2cacbdee37d330a8c181680058055c44b88da5387b56ff743b25d59542`；本轮本地 `apksigner verify --verbose` 通过（APK v2，1个签名者），沿用既有 Release 签名。联合发布脚本在服务器端完整下载并逐字节核对两个公网文件，再原子更新清单；清单响应与本地产物清单文本一致。两端版本均已发布。
+
+合成复现发现：旧会话 Goal 保持 `completed`，rollout 已追加新 `task_started` 且当前操作为 `inProgress` 时，Monitor 会重新读取详情，但生命周期归约的 Goal 优先级仍遮蔽运行态，造成看似未采集。本修复仅让有效期内的新回合活动证据优先决定展示状态；Goal 源字段不改写。普通活动证据30分钟无更新、仍有进行中操作时最长6小时，之后转为待确认/过期状态，不无限显示运行中。
+
+部署前严格 SSH 只读检查确认正式服务 active、schema=6、SQLite `integrity_check=ok`。部署备份也为 `integrity_check=ok`、schema=6，含223个任务、96,859条业务事件。部署没有迁移或清理历史数据；发布后与备份逐行核对，223个既有任务仍存在，96,859条既有业务事件的序号、标识、时间、Trace 关联及快照均保持一致，未发现缺失或改写。正式服务部署后仍为 active；公网 health、未授权请求401、HTTP/WS快照、Trace父节点、非法limit校验和订阅释放均通过，验收自身 `businessWrites=0`。生产只读验收读取到223个任务、cursor 96,964、RSS 98,099,200 字节（约93.6 MiB）。服务端源码和协议未因本修复改变；部署脚本备份数据库及 WAL/SHM、配置和旧 release 后切换。真实 Codex 会话、Windows 覆盖安装、物理手机和 OEM 后台策略仍不属于本轮证据；本次合成修复只覆盖已复现的旧 Goal 状态遮蔽路径，不能据此宣称其他未采集故障均已排除。
+
 ## 2026-10-19 正式部署与客户端发布（已完成）
 
 部署前通过严格 SSH 主机校验执行只读基线：正式服务 active，schema=6，任务221、业务事件72713、Trace span100517；公网 health、401、HTTP/WS 快照、Trace 父链、limit=0 参数校验和订阅释放通过，businessWrites=0。随后使用不可变 release 脚本部署服务端，备份 SQLite/WAL/SHM 及 systemd/Nginx 配置，备份完整性为 `ok`，schema、任务、事件和 Trace 行数保持不变；服务切换后公网只读链路再次全部通过，businessWrites=0，RSS 约92.3MiB。

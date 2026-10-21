@@ -19,13 +19,13 @@
 1. 官方 systemError 为 failed；官方等待标志为 needs_action。
 2. 官方当前 active 为 running，历史 Turn 不能覆盖当前活动证据。
 3. 最近回合 failed 为 failed；interrupted 为 needs_action。
-4. Goal 的非运行状态优先；原生 Goal active 转为 running，其他未完成限制转为 needs_action。
-5. inProgress 为候选 running；明确 completed 为 completed；其他为 needs_action。
-6. notLoaded 的运行候选必须通过生命周期证据核验；无证据则 needs_action/unavailable，不将历史 inProgress 无限视为运行。
+4. `notLoaded`/`idle` 线程若有有效的当前回合 `task_started` 证据，则为 running，并优先于旧 Goal 状态；不改写 Goal 字段。
+5. 回合 inProgress 证据过期且无进行中操作时为 needs_action/stale，不将未知活动伪装成 Goal 的已完成状态；无生命周期运行证据时，Goal 的非运行状态优先，原生 Goal active 转为 running。
+6. 没有有效生命周期或 Goal 运行证据时，inProgress 仅为候选 running，明确 completed 为 completed，其他为 needs_action；notLoaded 无证据时 freshness 为 unavailable，不把历史 inProgress 无限视为运行。
 
 动作只允许 command_execution、file_change、mcp_call、agent_message，不携带正文。
 
-上述规则用于官方基础状态。本机生命周期投影另有运行证据有效期：当 runtimeStatus 为 notLoaded、历史回合为 inProgress 且文件达到 30 分钟无写入时，没有进行中操作的回合展示 status 为 needs_action、freshness 为 stale、error.code 为 `ACTIVE_EVIDENCE_EXPIRED`；当前回合仍有 `inProgress` 操作时，在 6 小时内展示 status 为 running、freshness 为 stale 且不产生错误。Goal 的非 active 状态仍优先。latestTurn.inProgress 表示历史未结束标记，不能脱离 freshness 和当前操作状态解释为实时运行。恢复写入后重新投影；明确终止记录不会因时间过期而失效。内部 evidenceAt 和操作证据不进入协议载荷。
+上述规则用于官方基础状态。本机生命周期投影另有运行证据有效期：当 runtimeStatus 为 notLoaded，历史回合为 inProgress 且 rollout 文件达到 30 分钟无写入时，没有进行中操作的回合展示 `needs_action/stale`，错误码为 `ACTIVE_EVIDENCE_EXPIRED`；当前回合仍有 `inProgress` 操作时，在 6 小时内展示 running、freshness 为 stale 且不产生该过期错误。新回合的有效活动证据可以覆盖旧 Goal 展示状态，但不会改写 Goal 源字段；证据过期且没有当前操作后转为待确认。latestTurn.inProgress 表示历史未结束标记，不能脱离 freshness 和当前操作状态解释为实时运行。恢复写入后重新投影；明确终止记录不会因时间过期而失效。内部 evidenceAt 和操作证据不进入协议载荷。
 
 ## WebSocket
 
@@ -47,7 +47,7 @@ Android 序列化启用 `encodeDefaults=true` 和 `explicitNulls=false`：auth/s
 
 协议中的时间统一以 UTC ISO-8601 传输。Android 和 Windows 在显示时才转换到设备时区，包含本地日期和时间；Android 格式包含偏移量，Windows 使用系统本地化短日期/完整时间；不得去掉 Z 后直接当作本地时间，也不固定加八小时。
 
-`updatedAt` 是任务源数据的最近更新时间，不是扫描时间。对于由本机回合生命周期确定的展示状态，`changedAt` 是最近开始、完成或中止事件的时间，不随后续元数据更新而漂移；Goal 优先时保留归一化快照的 changedAt（当前来自线程元数据），它不是独立观测的 Goal 状态变更时间。缓存读取失败不把来源时间更新成现在。Windows 底部“最后采集”表示本次采集时间，不能代替任务发生时间。
+`updatedAt` 是任务源数据的最近更新时间，不是扫描时间。对于由本机回合生命周期确定的展示状态，`changedAt` 是最近开始、完成或中止事件的时间，不随后续元数据更新而漂移；没有有效活动回合证据且由 Goal 决定展示状态时，保留归一化快照的 changedAt（当前来自线程元数据），它不是独立观测的 Goal 状态变更时间。缓存读取失败不把来源时间更新成现在。Windows 底部“最后采集”表示本次采集时间，不能代替任务发生时间。
 
 运行证据过期属于观测新鲜度变化，不是已证实的任务终止，任务来源时间保持原值；此时不应把 changedAt 解释为任务实际停止时间。文件读取失败时，除了 freshness 变化，还会撤销已过期证据推断的 active。
 

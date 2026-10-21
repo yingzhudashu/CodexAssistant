@@ -47,7 +47,7 @@ rollout 冷启动从尾部读取，此后增量读取；每线程每轮预算 2 
 
 旧会话的新回合可先于线程元数据更新写入 rollout；缓存失效键包含路径与最近 lifecycle 的回合 ID、事件时间和状态，因此会重新采集当前回合操作。单个详情 RPC 失败时保留其最后成功字段，不丢弃其他成功详情；仅重试失败字段，并将结果明确标为 stale。`desktop.poll` 记录 lifecycle 路径缺失、无事件证据、读取失败/追赶中和各详情源失败计数，不上传错误文本。
 
-独立 app-server 的 notLoaded 不等于空闲。历史 task_started 只提供有限运行证据：普通回合静默 30 分钟、仍有 inProgress 操作的回合静默 6 小时后进入 needs_action/stale，并附 ACTIVE_EVIDENCE_EXPIRED；不能伪造完成。官方明确运行/等待状态与 Goal 优先级见[协议](protocol.zh-CN.md)。
+独立 app-server 的 notLoaded 不等于空闲。历史 task_started 只提供有限运行证据：普通回合静默 30 分钟、仍有 inProgress 操作的回合静默 6 小时后进入 needs_action/stale，并附 ACTIVE_EVIDENCE_EXPIRED；不能伪造完成。旧 Goal 的终态不能遮蔽已校验的新回合活动，但只更新展示状态，不改写 Goal 源值；证据过期后显式转为 needs_action/stale，Goal 源字段仍保留。官方明确运行/等待状态与 Goal 优先级见[协议](protocol.zh-CN.md)。
 
 ## 持久化与性能
 

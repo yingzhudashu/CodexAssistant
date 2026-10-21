@@ -6,7 +6,7 @@ import type { IngestEvent, TaskSnapshot } from "@codex-assistant/protocol";
 import { Monitor, DESKTOP_HOST_UNAVAILABLE_MESSAGE, ACTIVE_EVIDENCE_MAX_AGE_MS, IN_PROGRESS_ITEM_MAX_AGE_MS } from "../src/monitor.js";
 import type { AppServerNotification } from "../src/app-server.js";
 
-const mock = vi.hoisted(() => ({ path: "", reads: 0, itemReads: 0, goalReads: 0, goalFails: false, activeItem: true, itemTurnId: "turn-1", revision: 0, threads: undefined as Array<{ id: string; path?: string; updatedAt: string; status: { type: string } }> | undefined, notify: undefined as ((value: AppServerNotification) => void) | undefined }));
+const mock = vi.hoisted(() => ({ path: "", reads: 0, itemReads: 0, goalReads: 0, goalFails: false, goal: undefined as { objective: string; status: string; tokensUsed: number; timeUsedSeconds: number } | undefined, activeItem: true, itemTurnId: "turn-1", revision: 0, threads: undefined as Array<{ id: string; path?: string; updatedAt: string; status: { type: string } }> | undefined, notify: undefined as ((value: AppServerNotification) => void) | undefined }));
 vi.mock("../src/app-server.js", () => ({
   CodexAppServer: class {
     constructor(options: { onNotification: (value: AppServerNotification) => void }) { mock.notify = options.onNotification; }
@@ -14,7 +14,7 @@ vi.mock("../src/app-server.js", () => ({
     async start() {} async stop() {} setTraceContext() {}
     async listThreads() { return mock.threads ?? [{ id: "thread", path: mock.path, status: { type: "notLoaded" }, updatedAt: "2026-09-08T06:00:00Z" }]; }
     async readThread() { mock.reads++; return {}; }
-    async getGoal() { mock.goalReads++; if (mock.goalFails) throw new Error("synthetic goal read failure"); return undefined; }
+    async getGoal() { mock.goalReads++; if (mock.goalFails) throw new Error("synthetic goal read failure"); return mock.goal; }
     async listTurns() { return { data: [{ status: "interrupted" }] }; }
     async listItems() { mock.itemReads++; return { data: mock.activeItem ? [{ turnId: mock.itemTurnId, item: { type: "commandExecution", status: "inProgress" } }] : [] }; }
     latestTurn() { return undefined; } planFor() { return undefined; } planRevision() { return mock.revision; }
@@ -163,6 +163,64 @@ it("refreshes cached operation evidence when a historical thread starts a new ro
     await monitor?.stop();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    mock.threads = undefined;
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 15_000);
+
+it("shows and uploads a resumed historical thread as running despite its completed Goal", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-monitor-resumed-goal-"));
+  const base = Date.parse("2026-09-08T06:00:00Z");
+  mock.path = join(directory, "rollout.jsonl");
+  mock.reads = 0;
+  mock.itemReads = 0;
+  mock.goalReads = 0;
+  mock.goal = { objective: "old goal", status: "completed", tokensUsed: 1, timeUsedSeconds: 1 };
+  mock.activeItem = false;
+  mock.itemTurnId = "turn-1";
+  mock.revision = 0;
+  mock.threads = [{ id: "resumed-thread", path: mock.path, updatedAt: new Date(base).toISOString(), status: { type: "notLoaded" } }];
+  let now = base;
+  const event = (type: string, turnId: string, timestamp: number) => JSON.stringify({ type: "event_msg", timestamp: new Date(timestamp).toISOString(), payload: { type, turn_id: turnId } }) + "\n";
+  const snapshots: TaskSnapshot[] = [];
+  const uploaded: IngestEvent[] = [];
+  let nextPoll: (() => void) | undefined;
+  const waitForPoll = () => new Promise<void>(resolve => { nextPoll = resolve; });
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith("/events")) uploaded.push(JSON.parse(String(init.body)) as IngestEvent);
+    return { ok: true, status: 200, json: async () => ({ accepted: true, duplicate: false, sequence: uploaded.length }) };
+  }));
+  let monitor: Monitor | undefined;
+  try {
+    await writeFile(mock.path, event("task_complete", "turn-1", base));
+    await utimes(mock.path, base / 1000, base / 1000);
+    monitor = await Monitor.create({ stateDirectory: directory, apiUrl: "https://monitor.invalid", token: "test", deviceId: "test-device",
+      onTasks: tasks => snapshots.push(tasks[0]), onStatus: status => { if (status === "connected") { nextPoll?.(); nextPoll = undefined; } } });
+    await monitor.start();
+    expect(snapshots.at(-1)).toMatchObject({ status: "completed", goal: { status: "completed" } });
+
+    now = base + 1_000;
+    mock.itemTurnId = "turn-2";
+    mock.activeItem = true;
+    await appendFile(mock.path, event("task_started", "turn-2", now));
+    await utimes(mock.path, now / 1000, now / 1000);
+    await waitForPoll();
+
+    expect(mock.itemReads).toBe(2);
+    expect(snapshots.at(-1)).toMatchObject({
+      id: "resumed-thread",
+      status: "running",
+      latestTurn: { status: "inProgress" },
+      goal: { status: "completed" },
+      action: "command_execution",
+    });
+    expect(uploaded.map(row => row.task.status)).toEqual(["completed", "running"]);
+  } finally {
+    await monitor?.stop();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    mock.goal = undefined;
     mock.threads = undefined;
     await rm(directory, { recursive: true, force: true });
   }
