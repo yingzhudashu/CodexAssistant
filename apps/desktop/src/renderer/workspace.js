@@ -32,6 +32,7 @@ const s = {
   detail: null,
   cursor: null,
   epoch: 0,
+  connectionEpoch: 0,
   loading: false,
   error: "",
   detailError: "",
@@ -384,6 +385,7 @@ function bind() {
   on("#message-form", "submit", async (e) => {
     e.preventDefault();
     const id = s.selected;
+    const connectionEpoch = s.connectionEpoch;
     const text = s.draft.get(id)?.trim();
     if (!text || text.length > 20000 || !s.ready || s.pending.has(id)) return;
     s.pending.add(id);
@@ -394,6 +396,7 @@ function bind() {
         threadId: id,
         text,
       });
+      if (connectionEpoch !== s.connectionEpoch) return;
       if (r.status === "started" && s.draft.get(id)?.trim() === text)
         s.draft.delete(id);
       s.sent.set(
@@ -403,10 +406,13 @@ function bind() {
           : "发送未确认",
       );
     } catch (e) {
+      if (connectionEpoch !== s.connectionEpoch) return;
       s.sent.set(id, e.message || "结果尚未确认，请读取回合摘要核实后再发送。");
     } finally {
-      s.pending.delete(id);
-      render();
+      if (connectionEpoch === s.connectionEpoch) {
+        s.pending.delete(id);
+        render();
+      }
     }
   });
   on("[data-edit]", "click", () => {
@@ -447,6 +453,12 @@ function bind() {
       s.error = "";
       render();
       await window.codexAssistant.saveConnection({ apiUrl, token });
+      // 连接保存成功即撤销旧连接所有异步回执的写权限，不能等新状态读取结束。
+      s.connectionEpoch++;
+      s.epoch++;
+      s.pending.clear();
+      s.update = null;
+      s.checking = false;
       s.connection = await window.codexAssistant.getConnection();
       s.page = "tasks";
       s.form = null;
@@ -467,6 +479,8 @@ function bind() {
       render();
       root.querySelector("[data-keep]")?.focus();
     } else {
+      s.form = null;
+      s.reveal = false;
       s.page = "connection";
       render();
     }
@@ -478,6 +492,7 @@ function bind() {
   on("[data-discard]", "click", () => {
     s.discard = false;
     s.form = null;
+    s.reveal = false;
     s.page = "connection";
     s.error = "";
     render();
@@ -501,16 +516,21 @@ function bind() {
   });
   on("[data-update]", "click", async () => {
     if (s.checking) return;
+    const connectionEpoch = s.connectionEpoch;
     s.checking = true;
     s.error = "";
     render();
     try {
-      s.update = await window.codexAssistant.checkUpdate();
+      const update = await window.codexAssistant.checkUpdate();
+      if (connectionEpoch === s.connectionEpoch) s.update = update;
     } catch (e) {
-      s.error = e.message || "检查失败";
+      if (connectionEpoch === s.connectionEpoch)
+        s.error = e.message || "检查失败";
     } finally {
-      s.checking = false;
-      render();
+      if (connectionEpoch === s.connectionEpoch) {
+        s.checking = false;
+        render();
+      }
     }
   });
   on("[data-download]", "click", async (e) => {

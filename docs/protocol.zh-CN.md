@@ -65,7 +65,7 @@ HTTP body 上限 128 KiB，WebSocket 的 128 KiB 限制作用于客户端入站�
 
 任务筛选顺序与标签固定为：running/进行中、completed/已完成、failed/失败、needs_action/待确认。旧状态值删除，不提供兼容映射、migration 或 fallback。
 
-Windows 新增仅本机 IPC `workstation.status -> { ready: boolean }`，不携带 Token 或正文。ready 来源于本机 app-server 的初始化完成状态；它与云端同步、任务业务状态相互独立。该 IPC 不新增公网 API。
+Windows 新增仅本机 IPC `workstation.status -> { ready: boolean, desktopControlConnected: boolean }`，不携带 Token 或正文。ready 来源于本机 app-server 的初始化完成状态；它与云端同步、任务业务状态相互独立。该 IPC 不新增公网 API。
 
 
 ## Codex 交互请求合同

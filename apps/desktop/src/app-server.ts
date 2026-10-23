@@ -270,6 +270,9 @@ export class CodexAppServer {
     const idValue = this.#nextId++;
     const context = spanContext(this.#activeTrace);
     const startedAt = new Date().toISOString();
+    const started = performance.now();
+    let outcome = "success";
+    let errorCode: string | undefined;
     const response = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(idValue);
@@ -280,14 +283,38 @@ export class CodexAppServer {
     this.#child.stdin.write(
       `${JSON.stringify({ jsonrpc: "2.0", id: idValue, method, params })}\n`,
     );
-    return response.finally(() =>
-      this.#onSpan?.({
-        ...context,
-        name: `app_server.${method.replace(/[^A-Za-z0-9_.-]/g, "_")}`,
-        startedAt,
-        endedAt: new Date().toISOString(),
-      }),
-    );
+    return response
+      .catch((error: unknown) => {
+        outcome = "error";
+        // 官方错误正文可能含路径、命令或用户内容，只保留本客户端定义的固定分类。
+        const message = error instanceof Error ? error.message : "";
+        errorCode = [
+          "APP_SERVER_RPC_TIMEOUT",
+          "APP_SERVER_EXITED",
+          "APP_SERVER_STOPPED",
+          "APP_SERVER_SPAWN_FAILED",
+        ].includes(message)
+          ? message
+          : "APP_SERVER_RPC_ERROR";
+        throw error;
+      })
+      .finally(() => {
+        try {
+          this.#onSpan?.({
+            ...context,
+            name: `app_server.${method.replace(/[^A-Za-z0-9_.-]/g, "_")}`,
+            startedAt,
+            endedAt: new Date().toISOString(),
+            attributes: {
+              outcome,
+              latencyMs: String(Math.max(0, performance.now() - started)),
+              ...(errorCode ? { error: errorCode } : {}),
+            },
+          });
+        } catch {
+          // 诊断回调失败不能改变 RPC 原有结果，也不能掩盖官方错误。
+        }
+      });
   }
 
   async listThreads(): Promise<AppServerThread[]> {

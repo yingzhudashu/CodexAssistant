@@ -63,7 +63,8 @@ def edit_connection():
 def configure_connection():
     edit_connection()
     fields = d(className='android.widget.EditText')
-    assert fields.exists, 'connection form fields'
+    # 标题会先于 Compose 输入节点出现，等待实际表单可访问后再填写。
+    assert fields.wait(timeout=10), 'connection form fields'
     d(className='android.widget.EditText', instance=0).set_text('http://127.0.0.1:33241')
     d(className='android.widget.EditText', instance=1).set_text('synthetic-acceptance-token')
     click('保存并连接')

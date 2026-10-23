@@ -18,7 +18,7 @@ npm run perf:server
 npm run test:endurance
 ```
 
-Electron真实renderer使用合成IPC验证，不向真实Desktop写消息。持续同步30分钟使用真实HTTP/WS、1000个任务、每5分钟重连，只有completed=true且游标/任务数匹配及RSS增长门槛通过才算完成；不是完整历史内容一致性或生产SLA验证。
+Node测试包含真实本地HTTP/SQLite/WS与Monitor的完整往返，只有官方进程和消息宿主使用合成夹具。Electron真实renderer使用合成IPC验证，不向真实Desktop写消息；覆盖连接切换后的旧回执隔离与放弃编辑清除临时Token。持续同步30分钟使用真实HTTP/WS、1000个任务、每5分钟重连，只有completed=true且游标/任务数匹配及RSS增长门槛通过才算完成；不是完整历史内容一致性或生产SLA验证。
 
 设计静态检查仅需Python标准库；可选 `validate.py --visual` 需要Playwright、Pillow和本机Edge，执行所有SVG越界/HTML图片及锚点检查，报告输出到 artifacts/acceptance/design，禁止写回设计源目录。
 

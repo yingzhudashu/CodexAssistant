@@ -26,10 +26,16 @@ type EventRow = {
 
 type TaskRow = { snapshot: string };
 
+/** 快照只包含 JSON 值；递归冻结，防止某个调用方修改共享缓存中的计划或 Goal。 */
+function freezeJson(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  for (const child of Object.values(value)) freezeJson(child);
+  Object.freeze(value);
+}
+
 export type InsertResult = {
   duplicate: boolean;
   event: ServerEvent;
-  shouldNotify: boolean;
 };
 
 /** 单一本地SQLite文件拥有持久状态；schema不匹配直接拒绝启动。 */
@@ -38,6 +44,7 @@ export class TaskDatabase {
   #traceWritesSincePrune = 0;
   // 仅统计本实例执行的诊断清理，重启后归零；不是业务事件保留指标。
   #tracePrunedSpans = 0;
+  #cachedTasks?: TaskSnapshot[];
   // SQL 文本来自本模块的固定语句，容量由源码决定，不接收用户输入作为缓存键。
   readonly #statements = new Map<string, StatementSync>();
   #statement(sql: string): StatementSync {
@@ -140,14 +147,10 @@ export class TaskDatabase {
         return {
           duplicate: true,
           event: this.#eventFromRow(existing),
-          shouldNotify: false,
         };
       }
       const now = new Date().toISOString();
       const snapshot = JSON.stringify(input.task);
-      const previous = this.#statement(
-        "SELECT snapshot FROM tasks WHERE device_id = ? AND task_id = ?",
-      ).get(input.deviceId, input.task.id) as TaskRow | undefined;
       this.#statement(
         "INSERT INTO devices(device_id, first_seen_at, last_seen_at) VALUES (?, ?, ?) ON CONFLICT(device_id) DO UPDATE SET last_seen_at = excluded.last_seen_at",
       ).run(input.deviceId, now, now);
@@ -185,18 +188,12 @@ export class TaskDatabase {
         trace: input.trace,
         task: input.task,
       } satisfies ServerEvent;
-      const previousTask = previous
-        ? (JSON.parse(previous.snapshot) as TaskSnapshot)
-        : undefined;
       this.#database.exec("COMMIT");
+      // 只有新业务事件提交成功才失效。重复上传、Trace 写入、回滚均不改当前任务。
+      this.#cachedTasks = undefined;
       return {
         duplicate: false,
         event,
-        shouldNotify: Boolean(
-          previousTask &&
-          (previousTask.status !== input.task.status ||
-            previousTask.currentStepId !== input.task.currentStepId),
-        ),
       };
     } catch (error) {
       this.#database.exec("ROLLBACK");
@@ -332,11 +329,15 @@ export class TaskDatabase {
   }
 
   currentTasks(): TaskSnapshot[] {
-    return (
+    if (this.#cachedTasks) return this.#cachedTasks;
+    const tasks = (
       this.#statement(
         "SELECT snapshot FROM tasks ORDER BY updated_at DESC, server_sequence DESC",
       ).all() as TaskRow[]
     ).map((row) => JSON.parse(row.snapshot) as TaskSnapshot);
+    freezeJson(tasks);
+    this.#cachedTasks = tasks;
+    return tasks;
   }
 
   cursor(): number {

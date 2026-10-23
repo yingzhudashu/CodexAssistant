@@ -10,11 +10,7 @@ import {
   type ReadableSpan,
   type SpanExporter,
 } from "@opentelemetry/sdk-trace-base";
-import {
-  safeTraceSpan,
-  type TraceContext,
-  type TraceSpan,
-} from "@codex-assistant/protocol";
+import { safeTraceSpan, type TraceContext } from "@codex-assistant/protocol";
 import type { TaskDatabase } from "./database.js";
 
 /** 一个服务实例拥有自己的 provider，避免测试、多实例和关闭时相互污染全局上下文。 */

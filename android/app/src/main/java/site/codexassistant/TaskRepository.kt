@@ -16,6 +16,13 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
+/** 拒绝空正文、错误数量及未知字段；保留原队列等待后续上传，不假定 2xx 已落盘。 */
+internal fun isTraceReceipt(body: String, count: Int): Boolean = runCatching {
+    val receipt = wireJson.decodeFromString<TraceSpanReceipt>(body)
+    receipt.accepted && receipt.count == count && count in 1..100
+}
+    .getOrDefault(false)
+
 data class TaskState(
     val connectionEpoch: Long = 0,
     val networkAvailable: Boolean? = null,
@@ -209,7 +216,10 @@ internal constructor(
                             .build()
                     try {
                         traceClient.newCall(request).execute().use {
-                            if (it.isSuccessful)
+                            if (
+                                it.isSuccessful &&
+                                    isTraceReceipt(it.body?.string().orEmpty(), spans.size)
+                            )
                                 traceLogger.acknowledge(spans.map { span -> span.spanId }.toSet())
                         }
                     } catch (_: java.io.IOException) {}

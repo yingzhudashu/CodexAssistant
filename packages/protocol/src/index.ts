@@ -1,5 +1,5 @@
 import Type, { type Static, type TSchema } from "typebox";
-import { Value } from "typebox/value";
+import { Compile, type Validator } from "typebox/compile";
 
 export const PROTOCOL_VERSION = "codex-assistant.v3" as const;
 
@@ -78,6 +78,8 @@ export function safeTraceSpan(span: TraceSpan): TraceSpan {
     if (numeric.has(key) && /^\d+(?:\.\d+)?$/.test(value))
       attributes[key] = value;
     else if (key === "duplicate" && /^(true|false)$/.test(value))
+      attributes[key] = value;
+    else if (key === "outcome" && /^(success|error)$/.test(value))
       attributes[key] = value;
     else if (key === "taskId" && /^[A-Za-z0-9._:-]{1,200}$/.test(value))
       attributes[key] = value;
@@ -264,6 +266,13 @@ export const TraceSpanBatchSchema = Strict({
   spans: Type.Array(TraceSpanSchema, { minItems: 1, maxItems: 100 }),
 });
 export type TraceSpanBatch = Static<typeof TraceSpanBatchSchema>;
+
+/** HTTP 成功码不能替代持久化确认；客户端仅删除本次被完整确认的诊断批次。 */
+export const TraceSpanReceiptSchema = Strict({
+  accepted: Type.Literal(true),
+  count: Type.Integer({ minimum: 1, maximum: 100 }),
+});
+export type TraceSpanReceipt = Static<typeof TraceSpanReceiptSchema>;
 
 export const TasksResponseSchema = Strict({
   protocolVersion: Type.Literal(PROTOCOL_VERSION),
@@ -471,8 +480,16 @@ export type ServerWebSocketMessage = Static<
   typeof ServerWebSocketMessageSchema
 >;
 
+// 仅缓存代码内定义的 schema；WeakMap 不把短生命周期 schema 永久保活。
+// 复用既有 TypeBox 的编译器，避免每个事件、每次快照递归解释整份规则。
+const validators = new WeakMap<TSchema, Validator>();
 export function parseStrict<T>(schema: TSchema, value: unknown): T | undefined {
-  return Value.Check(schema, value) ? (value as T) : undefined;
+  let validator = validators.get(schema);
+  if (!validator) {
+    validator = Compile(schema);
+    validators.set(schema, validator);
+  }
+  return validator.Check(value) ? (value as T) : undefined;
 }
 
 export function protocolError(code: ErrorCode, message: string): ErrorMessage {

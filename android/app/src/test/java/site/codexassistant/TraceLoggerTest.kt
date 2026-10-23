@@ -5,6 +5,21 @@ import org.junit.Test
 
 class TraceLoggerTest {
     @Test
+    fun onlyAcknowledgesAnExactTraceReceipt() {
+        assertTrue(isTraceReceipt("""{"accepted":true,"count":2}""", 2))
+        for (body in
+            listOf(
+                "",
+                "{}",
+                """{"accepted":false,"count":2}""",
+                """{"accepted":true,"count":1}""",
+                """{"accepted":true,"count":2,"extra":true}""",
+            )) {
+            assertFalse(isTraceReceipt(body, 2))
+        }
+    }
+
+    @Test
     fun boundsBothQueuesAndKeepsAnExplicitBusinessParent() {
         val logger = TraceLogger {}
         repeat(1000) { logger.event("android.sync.connect") }

@@ -57,7 +57,6 @@ backup="/var/backups/codex-assistant/$release"
 previous="$(sudo readlink "$current" || true)"
 configs_changed=0
 service_touched=0
-state_changed=0
 sudo install -d -m 0700 "$backup"
 for config in /etc/systemd/system/codex-assistant.service /etc/nginx/snippets/codex-assistant.locations.conf "$nginx_config"; do
   if sudo test -f "$config"; then sudo cp -a "$config" "$backup/$(basename "$config")"; fi
@@ -87,13 +86,6 @@ rollback() {
   trap - EXIT
   if [ "$status" -ne 0 ]; then
     if [ "$service_touched" -eq 1 ]; then sudo systemctl stop codex-assistant.service || true; fi
-    if [ "$state_changed" -eq 1 ]; then
-      sudo install -d -m 0700 "$backup/failed-new-state"
-      for name in codex-assistant.sqlite codex-assistant.sqlite-wal codex-assistant.sqlite-shm; do
-        if sudo test -f "$state/$name"; then sudo mv "$state/$name" "$backup/failed-new-state/$name"; fi
-        if sudo test -f "$backup/$name"; then sudo mv "$backup/$name" "$state/$name"; fi
-      done
-    fi
     if [ "$configs_changed" -eq 1 ]; then
       for config in /etc/systemd/system/codex-assistant.service /etc/nginx/snippets/codex-assistant.locations.conf "$nginx_config"; do
         if sudo test -f "$backup/$(basename "$config")"; then sudo cp -a "$backup/$(basename "$config")" "$config"; else sudo rm -f "$config"; fi
@@ -126,6 +118,24 @@ sudo install -d -o codexassistant -g codexassistant -m 0750 "$target"
 sudo tar -xzf "$archive" -C "$target"
 sudo chown -R codexassistant:codexassistant "$target"
 sudo -u codexassistant -- env PATH=/opt/node-v22.23.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin NPM_CONFIG_CACHE="$state/npm-cache" /opt/node-v22.23.2-linux-x64/bin/npm ci --omit=dev --ignore-scripts --no-audit --no-fund --workspace=@codex-assistant/server --prefix "$target"
+# Refuse incompatible state before changing service/configuration. Never move user data or create an empty replacement.
+expected_schema="$(sudo sed -n 's/^const SCHEMA_VERSION = \([0-9]*\);/\1/p' "$target/apps/server/dist/database.js")"
+test -n "$expected_schema"
+if sudo test -f "$state/codex-assistant.sqlite"; then
+  existing_schema="$(sudo python3 - "$state/codex-assistant.sqlite" <<'PY'
+import sqlite3, sys
+with sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True) as connection:
+    tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+    if tables != ['devices', 'task_events', 'tasks', 'trace_spans']:
+        raise SystemExit('SCHEMA_MISMATCH: existing database tables preserved; deployment stopped')
+    print(connection.execute('PRAGMA user_version').fetchone()[0])
+PY
+)"
+  if [ "$existing_schema" != "$expected_schema" ]; then
+    echo "SCHEMA_MISMATCH: deployment stopped; existing database and service preserved" >&2
+    exit 1
+  fi
+fi
 if ! sudo test -f "$environment"; then
   token="$(/opt/node-v22.23.2-linux-x64/bin/node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
   sudo sh -c "printf '%s\n' 'CODEX_ASSISTANT_ACCESS_TOKEN=$token' > '$environment'"
@@ -148,26 +158,6 @@ path.write_text(source.replace(needle, include + needle, 1), encoding="utf-8")
 PY
 fi
 sudo nginx -t
-# Incompatible schema starts from empty state. Keep the old DB/WAL for rollback;
-# never migrate data or reopen the new database with the previous release.
-expected_schema="$(sudo sed -n 's/^const SCHEMA_VERSION = \([0-9]*\);/\1/p' "$target/apps/server/dist/database.js")"
-test -n "$expected_schema"
-if sudo test -f "$state/codex-assistant.sqlite"; then
-  existing_schema="$(sudo python3 - "$state/codex-assistant.sqlite" <<'PY'
-import sqlite3, sys
-with sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True) as connection:
-    print(connection.execute('PRAGMA user_version').fetchone()[0])
-PY
-)"
-  if [ "$existing_schema" != "$expected_schema" ]; then
-    service_touched=1
-    sudo systemctl stop codex-assistant.service
-    state_changed=1
-    for name in codex-assistant.sqlite codex-assistant.sqlite-wal codex-assistant.sqlite-shm; do
-      if sudo test -f "$state/$name"; then sudo mv "$state/$name" "$backup/$name"; fi
-    done
-  fi
-fi
 service_touched=1
 sudo ln -sfn "$target" "$current.next"
 sudo mv -Tf "$current.next" "$current"

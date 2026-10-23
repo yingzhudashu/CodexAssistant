@@ -72,6 +72,9 @@ data class TraceSpanBatch(
     val spans: List<TraceSpan>,
 )
 
+/** 仅持久化成功的完整批次可从本地诊断队列删除。 */
+@Serializable data class TraceSpanReceipt(val accepted: Boolean, val count: Int)
+
 @Serializable
 data class ServerEvent(
     val sequence: Long,

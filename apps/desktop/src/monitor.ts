@@ -13,9 +13,11 @@ import type {
 import {
   IngestEventSchema,
   IngestResponseSchema,
+  TraceSpanReceiptSchema,
   parseStrict,
   safeTraceSpan,
   type IngestResponse,
+  type TraceSpanReceipt,
 } from "@codex-assistant/protocol";
 import {
   CodexAppServer,
@@ -300,7 +302,7 @@ export class Monitor {
     // 手机控制通道不依赖本地 app-server 的初始化；先登记工作站，
     // 避免冷启动或 app-server 初始化变慢时手机请求被误判为工作站离线。
     this.#connectControl();
-    await this.#server.start();
+    // 初始化也属于可恢复轮询；如果在这里抛出，定时器永远不会建立，瞬时故障会变成永久离线。
     await this.#poll();
     if (!this.#stopping)
       this.#timer = setInterval(() => void this.#poll(), 2_000);
@@ -751,7 +753,6 @@ export class Monitor {
           itemFailures: String(itemFailures),
         }),
       );
-      this.#startTraceUpload();
       this.#onStatus("connected");
     } catch (error) {
       this.#recordSpan(
@@ -761,6 +762,8 @@ export class Monitor {
       );
       this.#onStatus("offline");
     } finally {
+      // app-server 或持久化持续失败时同样上报诊断，不能依赖下一次成功轮询。
+      this.#startTraceUpload();
       this.#server.setTraceContext(undefined);
       this.#polling = false;
       finish();
@@ -1361,6 +1364,7 @@ export class Monitor {
     const spans = this.#traceBuffer.slice(0, 100);
     const trace = newTraceContext();
     const startedAt = performance.now();
+    let phase: "request" | "response" | "receipt" = "request";
     try {
       const response = await fetch(
         `${this.#apiUrl}/codex-assistant/api/v3/traces/spans`,
@@ -1380,12 +1384,27 @@ export class Monitor {
           ]),
         },
       );
+      phase = "response";
       if (!response.ok) {
         this.#recordSpan(
           this.#span(trace, "desktop.trace_upload.error", startedAt, {
             phase: "response",
             status: String(response.status),
             error: "TRACE_HTTP_FAILED",
+          }),
+        );
+        return;
+      }
+      phase = "receipt";
+      const receipt = parseStrict<TraceSpanReceipt>(
+        TraceSpanReceiptSchema,
+        await response.json(),
+      );
+      if (!receipt || receipt.count !== spans.length) {
+        this.#recordSpan(
+          this.#span(trace, "desktop.trace_upload.error", startedAt, {
+            phase: "receipt",
+            error: "TRACE_RECEIPT_INVALID",
           }),
         );
         return;
@@ -1399,11 +1418,13 @@ export class Monitor {
       if (!this.#stopping)
         this.#recordSpan(
           this.#span(trace, "desktop.trace_upload.error", startedAt, {
-            phase: "request",
+            phase,
             error:
-              (error as Error)?.name === "TimeoutError"
-                ? "TRACE_UPLOAD_TIMEOUT"
-                : "TRACE_UPLOAD_FAILED",
+              phase === "receipt"
+                ? "TRACE_RECEIPT_INVALID"
+                : (error as Error)?.name === "TimeoutError"
+                  ? "TRACE_UPLOAD_TIMEOUT"
+                  : "TRACE_UPLOAD_FAILED",
           }),
         );
     }

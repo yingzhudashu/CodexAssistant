@@ -35,7 +35,7 @@ health 只证明服务响应；上线还须验证桌面上传、手机 snapshot 
 |消息超时|先读回合摘要核实。宿主 10 秒、服务路由 30 秒；未知结果不自动重发|
 |历史任务看似运行|检查 freshness、官方运行态及 ACTIVE_EVIDENCE_EXPIRED；notLoaded 不是 idle，文件证据也不是进程存活证明|
 |OUTBOX_INVALID|退出工作站并保留现场，从同一设备的有效当前格式备份恢复；禁止删队列后沿用旧 deviceId 从序号 1 上传|
-|SCHEMA_MISMATCH|停止服务，备份原库与 WAL/SHM，使用新的空状态；没有 migration 或兼容读取|
+|SCHEMA_MISMATCH|保留当前服务和原库，停止此次升级并核对匹配版本；禁止空库替换、migration 或兼容读取|
 |频繁 WS 重连|检查证书、反代 upgrade/超时、慢消费者背压与设备网络；完整快照负责恢复当前状态|
 |Trace 查不到|核对 ID、客户端待发队列、导出失败与保留窗口；等待最终上传后再查，不以诊断缺段认定业务失败|
 

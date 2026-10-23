@@ -9,7 +9,7 @@
 |[协议](protocol.zh-CN.md)|字段、状态、消息、时间与严格校验|
 |[消息发送](desktop-message-routing.zh-CN.md)|Desktop 通道、回执语义与所有权|
 |[Android 网络恢复](android-network-recovery.zh-CN.md)|连接状态机、生命周期、超时与测试|
-|[Trace](trace.zh-CN.md)|父子链路、批量上传、安全规则和查询|
+|[Trace](trace.zh-CN.md)|父子链路、批量上传、安全规则、查询与离线日志汇总|
 |[性能](performance.zh-CN.md)|优化设计、目标、测量口径与限制|
 |[安全](security.zh-CN.md)|凭据、信任边界、脱敏与发布材料|
 |[运维](operations.zh-CN.md)|配置、故障定位、备份和恢复|

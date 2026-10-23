@@ -1,16 +1,14 @@
 # 构建与发布
 
-发布状态：**已发布**。正式服务器客户端清单已更新为 Windows `2.0.22`、Android `2.0.20`（`versionCode=23`）；GitHub公开Release仍为 `v2.0.17`。协议 `codex-assistant.v3`，SQLite schema=6。生产服务器和下载站点坐标仅保存在本机SSH配置及仓库外记录。
+发布状态：**待发布**。候选源码为 Windows `2.0.23`、Android `2.0.21`（`versionCode=24`），协议 `codex-assistant.v3`，SQLite schema=6。此次本地审查没有发布、部署或重启正式服务。
 
-GitHub通用发行版仍可在本仓库主页 **Releases → v2.0.17 → Assets** 获取；正式服务器清单提供 `CodexAssistant-2.0.22.exe` 与 `CodexAssistant-2.0.20.apk`，供配置该服务器的客户端应用内更新使用。源码压缩包不能代替安装包。大小、哈希及测试边界见[验收记录](acceptance.zh-CN.md#构建与交付状态)。
-
-Windows 2.0.21和Android 2.0.19/code22是此前的历史发布。Windows 2.0.22针对本轮历史会话运行态修复重新构建并发布；Android源码未变化，继续复用已发布的2.0.20/code23签名包。两端当前版本均列入正式服务器清单；Windows x64安装器未签名。GitHub v2.0.17继续作为公开通用发行版；服务器清单与GitHub发行独立管理。所有既有版本化文件保持不可变并继续保留。
+已有正式服务器清单最后记录为 Windows 2.0.22、Android 2.0.20/code23，GitHub **Releases → v2.0.17 → Assets** 为较早公开发行。版本化安装包不可覆盖；发布候选时必须新建 `CodexAssistant-2.0.23.exe` 和 `CodexAssistant-2.0.21.apk`。签名、覆盖安装和正式服务器状态要在具体发布任务中重新核验，旧记录不是当前在线证据。
 
 ## 客户端升级指引
 
-|组件|当前版本与操作|
+|组件|已发布基线与升级操作（本轮未重新核验在线状态）|
 |---|---|
-|Windows|服务器清单提供2.0.22，应用标识为`site.codexassistant`。安装器未签名；升级前从托盘退出，并保留本地连接配置和outbox。真实覆盖安装未在本轮验证。|
+|Windows|服务器清单提供2.0.22，应用标识为`site.codexassistant`。安装器未签名；升级前从托盘退出，并保留本地连接配置和outbox。真实覆盖安装未在对应版本的历史验证。|
 |Android|服务器清单提供2.0.20/code23，使用原Release签名；首次使用的服务地址为空，需自行填写。已保存的连接配置不会因默认值清空而删除。|
 |服务端|协议v3、schema6；生产release已部署，业务数据原位保留且未执行migration。|
 
@@ -68,9 +66,9 @@ Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错�
 
 ## 服务端与回滚
 
-`scripts/deploy-production.ps1` 会修改目标服务器，依赖 SSH/scp/sudo、配置中 Node 路径和既有主站 Nginx 文件；调用前必须明确目标和发布授权。本轮已按用户部署授权执行，同schema保留现有业务数据。
+`scripts/deploy-production.ps1` 会修改目标服务器，依赖 SSH/scp/sudo、配置中 Node 路径和既有主站 Nginx 文件；调用前必须明确目标和发布授权。本轮没有部署授权或生产操作；脚本修改仅经过本地检查。
 
-脚本安装不可变 release，记录原 current，并备份 systemd unit、Nginx snippet/主配置至 `/var/backups/codex-assistant/<release-id>`。schema 不匹配时停服务，保存旧库及 WAL/SHM，再建立空状态；同 schema 保留业务数据。失败时恢复配置、旧状态和 current，失败的新状态单独保留。回滚是部署故障恢复，不是协议兼容或迁移。
+脚本安装不可变 release，记录原 current，并备份 systemd unit、Nginx snippet/主配置至 `/var/backups/codex-assistant/<release-id>`。版本不匹配时在服务与配置切换前退出，原库及 WAL/SHM 保持原位；同 schema 发布也不清空业务数据。失败时恢复配置和 current，保留当前数据库。回滚是部署故障恢复，不是协议兼容或迁移。
 
 成功后检查回环/公网 health、Token 鉴权、实际快照；客户端消息还需单独明确授权的验收会话。真实 OEM 后台、签名信任、生产资源限额分别验收。
 

@@ -115,8 +115,4 @@ class CredentialStore(context: Context) {
             )
             .apply()
     }
-
-    fun clear() {
-        preferences.edit().clear().apply()
-    }
 }

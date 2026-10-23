@@ -15,6 +15,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('interactions.get', () => requests);
   ipcMain.handle('task.send', async (_event, input) => { if(input.text==='reject-test') throw new Error('验收拒绝'); if(input.text==='slow-test') await new Promise(resolve=>setTimeout(resolve,1000)); return {status:'started'}; });
   ipcMain.handle('task.detail', () => ({ turns: [] }));
+  ipcMain.handle('connection.save', () => ({ configured: true }));
   ipcMain.handle('interaction.submit', (_event, input) => { if (input.value.answers.plan.answers[0] !== '继续实现') throw new Error('ANSWER_MISMATCH'); requests = []; report.interaction = true; return { status: 'submitted' }; });
   const win = new BrowserWindow({ show: false, width: 1100, height: 760, webPreferences: { contextIsolation: true, sandbox: true, preload: resolve('apps/desktop/dist/preload.cjs') } });
   win.webContents.on('preload-error', (_event, _path, error) => report.errors.push(error.message));
@@ -71,6 +72,17 @@ app.whenReady().then(async () => {
     await new Promise(resolve => setTimeout(resolve, 100));
     report.domDiagnostics = await win.webContents.executeJavaScript("({input:window.acceptanceInput===document.querySelector('#message'),card:window.acceptanceCard===document.querySelector('[data-task]'),focus:document.activeElement?.id})");
     report.stableDom = await win.webContents.executeJavaScript("window.acceptanceInput===document.querySelector('#message') && window.acceptanceCard===document.querySelector('[data-task]') && document.activeElement===window.acceptanceInput");
+    // 切换连接时，旧请求即使随后成功也不能删除新连接的草稿。
+    await draft('slow-test'); await submit();
+    await win.webContents.executeJavaScript("document.querySelector('[data-page=connection]').click();document.querySelector('[data-edit]').click();document.querySelector('#api-url').value='https://example.test';document.querySelector('#token').value='synthetic-new-token';document.querySelector('#connect').requestSubmit()");
+    await check("!!document.querySelector('[data-task]') && !document.querySelector('#connect')");
+    await win.webContents.executeJavaScript("document.querySelector('[data-task]').click();document.querySelector('[data-tab=message]').click()");
+    await draft('new-connection-draft');
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    report.connectionIsolation = await win.webContents.executeJavaScript("document.querySelector('#message').value === 'new-connection-draft' && !document.body.innerText.includes('Codex Desktop 已接受消息') && !document.querySelector('#send').disabled");
+    await win.webContents.executeJavaScript("document.querySelector('[data-page=connection]').click();document.querySelector('[data-edit]').click();document.querySelector('#token').value='synthetic-discarded-token';document.querySelector('#token').dispatchEvent(new Event('input'));document.querySelector('[data-cancel]').click();document.querySelector('[data-discard]').click();document.querySelector('[data-edit]').click()");
+    report.discardedSecret = await win.webContents.executeJavaScript("document.querySelector('#token').value === '' && document.querySelector('#token').type === 'password'");
+    await win.webContents.executeJavaScript("document.querySelector('[data-cancel]').click();document.querySelector('[data-page=tasks]').click()");
     const markdownFixture = '```js\nconst x = "<script>";\n```\n\n**结束**\n\n|列|值|\n|---|---|\n|一|二|\n\n<script>alert(1)</script>';
     report.markdown = await win.webContents.executeJavaScript(`(()=>{const el=document.createElement('div');el.innerHTML=window.renderRichText(${JSON.stringify(markdownFixture)});return el.querySelectorAll('pre').length===1 && el.querySelectorAll('pre code').length===1 && !!el.querySelector('strong') && !el.querySelector('pre strong') && !!el.querySelector('table') && !el.querySelector('script')})()`);
     const many = Array.from({ length: 1000 }, (_, i) => ({ ...tasks[0], id: `large-${i}`, title: `大列表任务 ${i}` }));

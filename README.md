@@ -2,11 +2,9 @@
 
 Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和 HTTPS 上传，由 Fastify/SQLite 服务保存，再以 WebSocket 同步给 Android。Windows 和 Android 均支持执行计划、按需回合摘要、消息发送、结构化交互、连接设置及主题切换。
 
-发布状态：**已发布**。正式服务器客户端清单已更新为 Windows **2.0.22**、Android **2.0.20**（Android versionCode **23**）；GitHub公开Release仍为 **v2.0.17**。协议 `codex-assistant.v3`，SQLite schema 为 **6**。根工作区、服务端、协议 npm 包版本仍为 2.0.0。服务器部署参数和操作记录保存在仓库外。
+发布状态：**待发布**。本次候选源码为 Windows **2.0.23**、Android **2.0.21**（Android versionCode **24**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**，根工作区、服务端、协议包仍为 2.0.0。候选修复未部署或发布。
 
-GitHub公开下载仍为 **Releases → v2.0.17 → Assets**：`CodexAssistant-2.0.17.exe`（Windows x64，未签名）、`CodexAssistant-2.0.17.apk`（Android Release签名）及 `SHA256SUMS.txt`。正式服务器清单提供 `CodexAssistant-2.0.22.exe` 与 `CodexAssistant-2.0.20.apk`。配置正式服务器的客户端可通过应用内更新读取该清单。公开安装包不预置服务器地址，首次使用需填写HTTPS根地址和Token。发布步骤见[构建与发布](docs/release.zh-CN.md)，验证范围见[验收记录](docs/acceptance.zh-CN.md)。
-
-Windows 2.0.22包含本轮历史会话运行态投影修复。Android 2.0.20/code23 的源码本轮未变，继续提供此前已发布的工作站连接、发送回执和后台通知修复。Android安装后在设置→通知检查通知权限和“允许后台持续连接”。Windows安装器未签名；升级前退出旧客户端并保留本地连接及outbox。详细步骤见[客户端升级指引](docs/release.zh-CN.md#客户端升级指引)。
+既有正式服务器清单最后记录为 Windows 2.0.22、Android 2.0.20/code23；公开 **Releases → v2.0.17 → Assets** 仍是历史发行。当前工作树、正式服务器与公开发行分别管理，不能用旧安装包的验收冒充本次候选验收。升级和签名边界见[发布说明](docs/release.zh-CN.md)，当前证据见[验收记录](docs/acceptance.zh-CN.md)。
 
 ## 使用边界
 
@@ -15,7 +13,7 @@ Windows 2.0.22包含本轮历史会话运行态投影修复。Android 2.0.20/cod
 - 普通消息经本机 Codex Desktop 的 app-tools 管道提交，必须保持 Desktop 运行。该管道不是公开稳定 API，需随 Desktop 更新验收。`started` 只表示接受消息，不表示回合完成。
 - 自动同步不上传完整对话、命令正文、输出、绝对路径或隐藏推理。用户主动发送的消息、主动读取的摘要与结构化交互会经服务透传。
 - Android 用前台服务、唯一 WebSocket 和系统通知同步；设备系统决定后台执行和通知权限。
-- 所有端仅接受当前协议。旧 schema、未知字段、损坏 outbox 直接报错，不提供迁移、兼容层或静默重置。
+- 所有端仅接受当前协议。旧 schema、未知字段、损坏 outbox 直接报错；部署必须保留原数据库和服务，不提供迁移、兼容层或静默重置。
 
 ## 开发
 
@@ -62,4 +60,4 @@ Kotlin格式化使用Gradle维护工具 `formatKotlin` / `checkKotlinFormat`（k
 
 安装包构建见 [发布说明](docs/release.zh-CN.md)，服务配置见 [部署说明](deploy/README.md)和[运维手册](docs/operations.zh-CN.md)。本地构建不发布；运行 `scripts/deploy-production.ps1` 才会修改目标服务器。
 
-停止本项目构建及调试进程后，用 `npm run clean -- -WhatIf` 预览，再运行 `npm run clean`。清理固定生成目录（含整个 artifacts 内的安装包与验收截图）、构建缓存和报告；保留依赖、业务 `.state`、Gradle Wrapper、本地 SDK 配置和仓库外签名材料。需要保存的最终产物先复制到工作区外。源码仓库不保存阶段报告、历史截图或发布过程日志。
+停止本项目构建及调试进程后，用 `npm run clean -- -WhatIf` 预览，再运行 `npm run clean`。清理脚本列出的固定生成目录、构建缓存和报告；不会删除整个 artifacts，其中未列出的历史材料需先核对再清理。保留依赖、业务 `.state`、Gradle Wrapper、本地 SDK 配置和仓库外签名材料。需要保存的最终产物先复制到工作区外。源码仓库不保存阶段报告、历史截图或发布过程日志。

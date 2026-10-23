@@ -42,3 +42,11 @@ limit 必须为 1–1000 的整数；非法参数 422，无记录 404。结果�
 桌面 `desktop.poll` 汇总记录线程数、rollout 路径缺失/未找到事件/读取失败/追赶中次数，以及 thread/goal/turns/items 详情 RPC 的分项失败数；只记录计数，不记录会话路径、原始错误或内容。用于区分缺少输入文件、冷启动追赶和局部详情超时。
 
 排查顺序：任务 status/freshness/error → 当前连接与 outbox → `desktop.poll` 的 lifecycle 与详情失败计数 → 事件 traceId → poll/RPC/event/upload/http/ingest/reducer 分支。ACTIVE_EVIDENCE_EXPIRED 表示生命周期证据过期，与 Trace 存储失败无关。分享现场前检查本地业务配置和日志是否含秘密。
+
+## RPC 故障与离线分析
+
+app-server RPC 记录 `outcome=success/error`、单调时钟计算的 `latencyMs`。失败只使用本机固定分类（超时、进程退出、停止、启动失败、其余 RPC 错误），不上传官方错误正文；旧记录没有 outcome 时不能推断成功。初始化失败纳入轮询重试，`desktop.poll.error` 在失败轮次也通过独立上传器尝试发送。
+
+桌面与 Android 只有收到严格的 `{accepted:true,count:本批数量}` 才移除上传队列中的对应 span。空响应、错误数量或未知字段不是确认；桌面以 `phase=receipt` 记录该故障。诊断故障仍不改变业务提交结果。
+
+离线运行 `node scripts/analyze-trace.mjs <trace.jsonl> [trace.jsonl.1]`，输出 JSON 汇总：输入摘要、有效/坏行、每类调用次数、耗时直方图、错误及缺少 outcome 数、采集失败计数和未找到的父节点数。它只读文件，不输出任务标识、正文或原始错误；关联索引最多十万项，超过后显式标为截断。日志正在轮转时两份文件可能不属于同一时刻，严谨比较应由用户先导出稳定副本。父节点缺失也可能来自正常轮转或延迟上传，不能当成业务失败。
