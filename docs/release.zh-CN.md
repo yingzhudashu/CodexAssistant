@@ -1,15 +1,15 @@
 # 构建与发布
 
-发布状态：**待发布**。候选源码为 Windows `2.0.23`、Android `2.0.21`（`versionCode=24`），协议 `codex-assistant.v3`，SQLite schema=6。此次本地审查没有发布、部署或重启正式服务。
+发布状态：**已发布**。Windows `2.0.23`、Android `2.0.21`（`versionCode=24`），协议 `codex-assistant.v3`，SQLite schema=6。2026-10-23按用户追加授权完成服务端部署、客户端发布及公网验收。
 
-已有正式服务器清单最后记录为 Windows 2.0.22、Android 2.0.20/code23，GitHub **Releases → v2.0.17 → Assets** 为较早公开发行。版本化安装包不可覆盖；发布候选时必须新建 `CodexAssistant-2.0.23.exe` 和 `CodexAssistant-2.0.21.apk`。签名、覆盖安装和正式服务器状态要在具体发布任务中重新核验，旧记录不是当前在线证据。
+服务器联合清单与 GitHub **Releases → v2.0.23 → Assets** 提供 `CodexAssistant-2.0.23.exe`、`CodexAssistant-2.0.21.apk` 和校验值。版本化文件不可覆盖同名不同字节。两端安装包经过公网完整下载校验；旧发行保留，不能用旧包验收代替本轮证据。
 
 ## 客户端升级指引
 
-|组件|已发布基线与升级操作（本轮未重新核验在线状态）|
+|组件|当前发行与升级操作|
 |---|---|
-|Windows|服务器清单提供2.0.22，应用标识为`site.codexassistant`。安装器未签名；升级前从托盘退出，并保留本地连接配置和outbox。真实覆盖安装未在对应版本的历史验证。|
-|Android|服务器清单提供2.0.20/code23，使用原Release签名；首次使用的服务地址为空，需自行填写。已保存的连接配置不会因默认值清空而删除。|
+|Windows|服务器清单提供2.0.23，应用标识为`site.codexassistant`。安装器未签名；升级前从托盘退出，并保留本地连接配置和outbox。真实覆盖安装未在对应版本的历史验证。|
+|Android|服务器清单提供2.0.21/code24，使用原Release签名；首次使用的服务地址为空，需自行填写。已保存的连接配置不会因默认值清空而删除。|
 |服务端|协议v3、schema6；生产release已部署，业务数据原位保留且未执行migration。|
 
 Windows在“关于与更新”、Android在设置页点击“检查更新”后，通过系统浏览器下载安装包，也可使用本页下载链接。应用不会静默安装更新。Windows升级前从托盘菜单“退出”停止工作站，安装后重新打开并检查连接和采集状态；仅关闭窗口会继续在托盘运行。Android安装后打开应用，确认连接成功，并在设置→通知核对系统通知权限、提醒渠道和电池优化状态；需要息屏及时接收时，点击“允许后台持续连接”并在系统界面确认。部分厂商还需设置自启动和后台运行权限，排查方式见[运维手册](operations.zh-CN.md#android-生命周期)。
@@ -66,7 +66,7 @@ Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错�
 
 ## 服务端与回滚
 
-`scripts/deploy-production.ps1` 会修改目标服务器，依赖 SSH/scp/sudo、配置中 Node 路径和既有主站 Nginx 文件；调用前必须明确目标和发布授权。本轮没有部署授权或生产操作；脚本修改仅经过本地检查。
+`scripts/deploy-production.ps1` 会修改目标服务器，依赖 SSH/scp/sudo、配置中 Node 路径和既有主站 Nginx 文件；调用前必须明确目标和发布授权。本轮已获授权并完成部署。构建、数据库一致备份、版本结构校验、回环/公网健康检查均通过，线上只读验收覆盖鉴权、HTTP/WS快照、Trace和订阅释放。
 
 脚本安装不可变 release，记录原 current，并备份 systemd unit、Nginx snippet/主配置至 `/var/backups/codex-assistant/<release-id>`。版本不匹配时在服务与配置切换前退出，原库及 WAL/SHM 保持原位；同 schema 发布也不清空业务数据。失败时恢复配置和 current，保留当前数据库。回滚是部署故障恢复，不是协议兼容或迁移。
 
@@ -74,6 +74,6 @@ Windows 用 semver 比较版本，Android 用 versionCode；无效清单报错�
 
 `scripts/acceptance/production-readonly.mjs` 在目标服务器执行，读取既有环境凭据，检查公网鉴权、HTTP/WS 快照、Trace 父节点及订阅释放。只输出计数与布尔结果，不写业务事件、不发送消息、不打印任务正文或 Token；执行方式见[验收脚本说明](../scripts/acceptance/README.md#生产部署后只读检查)。
 
-安装包不提交Git源代码历史，服务器文件与版本清单独立发布；原始报告不公开。真实部署地址、SSH别名、站点配置文件名、release和备份标识、业务计数仅保存于仓库外。GitHub v2.0.17公开资产与服务器Windows 2.0.22 / Android 2.0.20清单分别管理，不互相覆盖。Windows安装器未签名且真实覆盖安装需单独验收。
+安装包不提交Git源代码历史，服务器文件与版本清单独立发布；原始报告不公开。真实部署地址、SSH别名、站点配置文件名、release和备份标识、业务计数仅保存于仓库外。GitHub v2.0.23公开资产与服务器Windows 2.0.23 / Android 2.0.21清单分别管理，两者指向本轮相同安装包。Windows安装器未签名且真实覆盖安装需单独验收。
 
 需要保留最终交付物时先复制到工作区之外，再执行 `npm run clean -- -WhatIf` / `npm run clean`。

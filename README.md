@@ -2,9 +2,9 @@
 
 Windows 工作站采集 Codex 任务进度，经过脱敏、持久化 outbox 和 HTTPS 上传，由 Fastify/SQLite 服务保存，再以 WebSocket 同步给 Android。Windows 和 Android 均支持执行计划、按需回合摘要、消息发送、结构化交互、连接设置及主题切换。
 
-发布状态：**待发布**。本次候选源码为 Windows **2.0.23**、Android **2.0.21**（Android versionCode **24**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**，根工作区、服务端、协议包仍为 2.0.0。候选修复未部署或发布。
+发布状态：**已发布**。Windows **2.0.23**、Android **2.0.21**（Android versionCode **24**）；协议 `codex-assistant.v3`，SQLite schema 为 **6**，根工作区、服务端、协议包仍为 2.0.0。服务端与两端下载清单已完成生产部署及公网校验。
 
-既有正式服务器清单最后记录为 Windows 2.0.22、Android 2.0.20/code23；公开 **Releases → v2.0.17 → Assets** 仍是历史发行。当前工作树、正式服务器与公开发行分别管理，不能用旧安装包的验收冒充本次候选验收。升级和签名边界见[发布说明](docs/release.zh-CN.md)，当前证据见[验收记录](docs/acceptance.zh-CN.md)。
+公开安装包位于 **Releases → v2.0.23 → Assets**：`CodexAssistant-2.0.23.exe`、`CodexAssistant-2.0.21.apk` 和 `SHA256SUMS.txt`。Windows安装器未签名，Android使用原Release签名。当前源码、正式服务器与公开发行分别校验。升级和签名边界见[发布说明](docs/release.zh-CN.md)，当前证据见[验收记录](docs/acceptance.zh-CN.md)。
 
 ## 使用边界
 
