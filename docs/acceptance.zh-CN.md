@@ -51,7 +51,7 @@
 
 ## 构建与交付状态
 
-本轮使用已验证的Windows安装器和原Release签名Android APK完成服务器下载清单及GitHub Release发布；两份安装包公网完整下载后的大小和SHA-256均匹配。Windows安装器仍未签名；Debug包未发布，未替用户在物理设备安装。最终结果记录在本页和唯一TASK.md，交付补丁、可还原源码和原始验证记录位于仓库外。
+本轮使用已验证的Windows安装器和原Release签名Android APK完成服务器下载清单及GitHub Release发布；服务器下载站的两份安装包经公网完整下载后，大小和SHA-256均匹配。GitHub官方API确认发行附件大小与SHA-256一致；当前出口对GitHub CDN的完整下载在默认连接及两个已解析节点均停滞，未完成该下载路径的字节复核。Windows安装器仍未签名；Debug包未发布，未替用户在物理设备安装。最终结果记录在本页和唯一TASK.md，交付补丁、可还原源码和原始验证记录位于仓库外。
 
 生产验收：不可变服务release构建与上线通过，部署前使用SQLite backup API获取一致备份；当前库integrity_check=ok、schema6、外键无违规。备份中的全部业务事件逐字段一致，历史任务及设备记录保留。16个已部署运行文件与本地构建字节一致，服务active且NRestarts=0；现有客户端正常重新上传。公网health、401、授权HTTP/WS快照、Trace父节点、422和订阅释放通过，验收自身业务写入0。
 
